@@ -1,7 +1,3 @@
-//! ## Label
-//!
-//! label component
-
 use tuirealm::command::{Cmd, CmdResult};
 use tuirealm::event::{Key, KeyEvent, KeyModifiers};
 use tuirealm::props::{Alignment, Borders, Color, Style, TextModifiers};

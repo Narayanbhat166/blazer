@@ -1,15 +1,14 @@
-use std::time::{Duration};
+use std::time::Duration;
 
 use tuirealm::event::NoUserEvent;
 
 use tuirealm::terminal::TerminalBridge;
 use tuirealm::tui::layout::{Constraint, Direction, Layout};
-use tuirealm::{
-    Application, EventListenerCfg, Update,
-};
+use tuirealm::{Application, EventListenerCfg, Update};
 
 use crate::components::{
     counter::{DigitCounter, LetterCounter},
+    menu::Menu,
     Id, Msg,
 };
 
@@ -46,7 +45,8 @@ impl Model {
                     .margin(1)
                     .constraints(
                         [
-                            Constraint::Length(3), // Clock
+                            Constraint::Length(1), // Menu
+                            Constraint::Length(3), // Letter Counter
                             Constraint::Length(3), // Letter Counter
                             Constraint::Length(3), // Digit Counter
                             Constraint::Length(1), // Label
@@ -54,8 +54,9 @@ impl Model {
                         .as_ref(),
                     )
                     .split(f.size());
-                self.app.view(&Id::LetterCounter, f, chunks[1]);
-                self.app.view(&Id::DigitCounter, f, chunks[2]);
+                self.app.view(&Id::Menu, f, chunks[1]);
+                self.app.view(&Id::LetterCounter, f, chunks[2]);
+                self.app.view(&Id::DigitCounter, f, chunks[3]);
             })
             .is_ok());
     }
@@ -74,22 +75,29 @@ impl Model {
         );
 
         // Mount counters
-        assert!(app
-            .mount(
-                Id::LetterCounter,
-                Box::new(LetterCounter::new(0)),
-                Vec::new()
-            )
-            .is_ok());
-        assert!(app
-            .mount(
-                Id::DigitCounter,
-                Box::new(DigitCounter::new(5)),
-                Vec::default()
-            )
-            .is_ok());
+        app.mount(
+            Id::LetterCounter,
+            Box::new(LetterCounter::new(0)),
+            Vec::new(),
+        )
+        .unwrap();
+
+        app.mount(
+            Id::DigitCounter,
+            Box::new(DigitCounter::new(5)),
+            Vec::default(),
+        )
+        .unwrap();
+
+        app.mount(
+            Id::Menu,
+            Box::new(Menu::new(&["New", "Room", "Practice"])),
+            Vec::default(),
+        )
+        .unwrap();
+
         // Active letter counter
-        assert!(app.active(&Id::LetterCounter).is_ok());
+        assert!(app.active(&Id::Menu).is_ok());
         app
     }
 }
@@ -126,6 +134,7 @@ impl Update<Msg> for Model {
                     // Update label
                     None
                 }
+                Msg::StateUpdate => None,
             }
         } else {
             None
