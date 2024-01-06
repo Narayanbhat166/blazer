@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package server;
+
+service Grpc {
+    rpc Ping (PingRequest) returns (PingResponse);
+}
+
+message PingRequest {
+    optional uint32 client_id = 1;
+}
+
+message PingResponse {
+    uint32 client_id = 1;
+    optional string client_name = 2;    
+}
+
+
+
+

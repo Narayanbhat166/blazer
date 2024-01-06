@@ -1,3 +1,4 @@
+pub mod bottom_bar;
 pub mod counter;
 pub mod menu;
 
@@ -11,12 +12,12 @@ pub enum Msg {
     LetterCounterChanged(isize),
     LetterCounterBlur,
     StateUpdate,
+    PingServer,
+    SelectMenu,
 }
 
 // Let's define the component ids for our application
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub enum Id {
     Menu,
-    DigitCounter,
-    LetterCounter,
 }

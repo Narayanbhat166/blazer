@@ -178,8 +178,6 @@ impl OwnStates {
     }
 }
 
-// -- Counter components
-
 #[derive(MockComponent)]
 pub struct LetterCounter {
     component: Counter,

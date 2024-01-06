@@ -1,3 +1,4 @@
+use std::sync::mpsc;
 use std::time::Duration;
 
 use tuirealm::event::NoUserEvent;
@@ -6,16 +7,16 @@ use tuirealm::terminal::TerminalBridge;
 use tuirealm::tui::layout::{Constraint, Direction, Layout};
 use tuirealm::{Application, EventListenerCfg, Update};
 
-use crate::components::{
-    counter::{DigitCounter, LetterCounter},
-    menu::Menu,
-    Id, Msg,
-};
+use crate::app::network::{NetworkClient, UserEvent};
+use crate::components::{menu::Menu, Id, Msg};
+
+use super::network;
 
 pub struct Model {
     /// Application
-    pub app: Application<Id, Msg, NoUserEvent>,
+    pub app: Application<Id, Msg, UserEvent>,
     /// Indicates that the application must quit
+    pub grpc_channel: mpsc::Sender<network::Request>,
     pub quit: bool,
     /// Tells whether to redraw interface
     pub redraw: bool,
@@ -25,8 +26,20 @@ pub struct Model {
 
 impl Default for Model {
     fn default() -> Self {
+        let (grpc_sender, grpc_receiver) = mpsc::channel::<network::Request>();
+        // start the network client
+
+        let network_client = NetworkClient::new();
+        let cloned_network_client = network_client.clone();
+
+        std::thread::spawn(|| network_client.start_network_client(grpc_receiver));
+
+        // Check network connectivity
+        grpc_sender.send(network::Request::Ping);
+
         Self {
-            app: Self::init_app(),
+            app: Self::init_app(cloned_network_client),
+            grpc_channel: grpc_sender,
             quit: false,
             redraw: true,
             terminal: TerminalBridge::new().expect("Cannot initialize terminal"),
@@ -45,49 +58,31 @@ impl Model {
                     .margin(1)
                     .constraints(
                         [
-                            Constraint::Length(1), // Menu
-                            Constraint::Length(3), // Letter Counter
-                            Constraint::Length(3), // Letter Counter
-                            Constraint::Length(3), // Digit Counter
-                            Constraint::Length(1), // Label
+                            Constraint::Length(3), // Menu
+                            Constraint::Min(10),   // Action area
+                            Constraint::Length(3), // Bottom bar
                         ]
                         .as_ref(),
                     )
                     .split(f.size());
-                self.app.view(&Id::Menu, f, chunks[1]);
-                self.app.view(&Id::LetterCounter, f, chunks[2]);
-                self.app.view(&Id::DigitCounter, f, chunks[3]);
+                self.app.view(&Id::Menu, f, chunks[0]);
             })
             .is_ok());
     }
 
-    fn init_app() -> Application<Id, Msg, NoUserEvent> {
+    fn init_app(network_client: NetworkClient) -> Application<Id, Msg, UserEvent> {
         // Setup application
         // NOTE: NoUserEvent is a shorthand to tell tui-realm we're not going to use any custom user event
         // NOTE: the event listener is configured to use the default crossterm input listener and to raise a Tick event each second
         // which we will use to update the clock
 
-        let mut app: Application<Id, Msg, NoUserEvent> = Application::init(
+        let mut app: Application<Id, Msg, UserEvent> = Application::init(
             EventListenerCfg::default()
                 .default_input_listener(Duration::from_millis(20))
+                .port(Box::new(network_client), Duration::from_micros(100))
                 .poll_timeout(Duration::from_millis(10))
                 .tick_interval(Duration::from_secs(1)),
         );
-
-        // Mount counters
-        app.mount(
-            Id::LetterCounter,
-            Box::new(LetterCounter::new(0)),
-            Vec::new(),
-        )
-        .unwrap();
-
-        app.mount(
-            Id::DigitCounter,
-            Box::new(DigitCounter::new(5)),
-            Vec::default(),
-        )
-        .unwrap();
 
         app.mount(
             Id::Menu,
@@ -96,7 +91,7 @@ impl Model {
         )
         .unwrap();
 
-        // Active letter counter
+        // Active the menu
         assert!(app.active(&Id::Menu).is_ok());
         app
     }
@@ -116,25 +111,16 @@ impl Update<Msg> for Model {
                     None
                 }
                 Msg::Clock => None,
-                Msg::DigitCounterBlur => {
-                    // Give focus to letter counter
-                    assert!(self.app.active(&Id::LetterCounter).is_ok());
-                    None
-                }
-                Msg::DigitCounterChanged(_v) => {
-                    // Update label
-                    None
-                }
-                Msg::LetterCounterBlur => {
-                    // Give focus to digit counter
-                    assert!(self.app.active(&Id::DigitCounter).is_ok());
-                    None
-                }
-                Msg::LetterCounterChanged(_v) => {
-                    // Update label
-                    None
-                }
+                Msg::DigitCounterBlur => None,
+                Msg::DigitCounterChanged(_v) => None,
+                Msg::LetterCounterBlur => None,
+                Msg::LetterCounterChanged(_v) => None,
                 Msg::StateUpdate => None,
+                Msg::PingServer => None,
+                Msg::SelectMenu => {
+                    self.grpc_channel.send(network::Request::Ping).unwrap();
+                    None
+                }
             }
         } else {
             None
