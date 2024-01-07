@@ -1,14 +1,15 @@
 use std::sync::mpsc;
 use std::time::Duration;
 
-use tuirealm::event::NoUserEvent;
-
 use tuirealm::terminal::TerminalBridge;
 use tuirealm::tui::layout::{Constraint, Direction, Layout};
 use tuirealm::{Application, EventListenerCfg, Update};
 
-use crate::app::network::{NetworkClient, UserEvent};
 use crate::components::{menu::Menu, Id, Msg};
+use crate::{
+    app::network::{NetworkClient, UserEvent},
+    components::bottom_bar::BottomBar,
+};
 
 use super::network;
 
@@ -35,7 +36,7 @@ impl Default for Model {
         std::thread::spawn(|| network_client.start_network_client(grpc_receiver));
 
         // Check network connectivity
-        grpc_sender.send(network::Request::Ping);
+        grpc_sender.send(network::Request::Ping).unwrap();
 
         Self {
             app: Self::init_app(cloned_network_client),
@@ -66,6 +67,8 @@ impl Model {
                     )
                     .split(f.size());
                 self.app.view(&Id::Menu, f, chunks[0]);
+                self.app
+                    .view(&Id::BottomBar, f, chunks.last().unwrap().clone());
             })
             .is_ok());
     }
@@ -91,13 +94,21 @@ impl Model {
         )
         .unwrap();
 
+        app.mount(
+            Id::BottomBar,
+            Box::new(BottomBar::new()),
+            vec![tuirealm::Sub::new(
+                tuirealm::SubEventClause::Any,
+                tuirealm::SubClause::Always,
+            )],
+        )
+        .unwrap();
+
         // Active the menu
         assert!(app.active(&Id::Menu).is_ok());
         app
     }
 }
-
-// Let's implement Update for model
 
 impl Update<Msg> for Model {
     fn update(&mut self, msg: Option<Msg>) -> Option<Msg> {

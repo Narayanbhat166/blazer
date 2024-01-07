@@ -17,7 +17,7 @@ impl MyGrpc {
 impl grpc_server::Grpc for MyGrpc {
     async fn ping(
         &self,
-        request: tonic::Request<PingRequest>,
+        _request: tonic::Request<PingRequest>,
     ) -> Result<tonic::Response<PingResponse>, tonic::Status> {
         log::info!("Received Request");
         Err(tonic::Status::ok("All good"))

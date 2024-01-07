@@ -1,7 +1,4 @@
-use blazer::grpc::{
-    self,
-    server::{self, grpc_server, MyGrpc},
-};
+use blazer::grpc::server::{grpc_server, MyGrpc};
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
