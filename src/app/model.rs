@@ -12,6 +12,7 @@ use crate::{
 };
 
 use super::network;
+use super::types::ClientConfig;
 
 pub struct Model {
     /// Application
@@ -25,15 +26,15 @@ pub struct Model {
     pub terminal: TerminalBridge,
 }
 
-impl Default for Model {
-    fn default() -> Self {
+impl Model {
+    pub fn new(config: ClientConfig) -> Self {
         let (grpc_sender, grpc_receiver) = mpsc::channel::<network::Request>();
         // start the network client
 
-        let network_client = NetworkClient::new();
+        let mut network_client = NetworkClient::new();
         let cloned_network_client = network_client.clone();
 
-        std::thread::spawn(|| network_client.start_network_client(grpc_receiver));
+        std::thread::spawn(move || network_client.start_network_client(grpc_receiver, config));
 
         // Check network connectivity
         grpc_sender.send(network::Request::Ping).unwrap();
@@ -74,15 +75,10 @@ impl Model {
     }
 
     fn init_app(network_client: NetworkClient) -> Application<Id, Msg, UserEvent> {
-        // Setup application
-        // NOTE: NoUserEvent is a shorthand to tell tui-realm we're not going to use any custom user event
-        // NOTE: the event listener is configured to use the default crossterm input listener and to raise a Tick event each second
-        // which we will use to update the clock
-
         let mut app: Application<Id, Msg, UserEvent> = Application::init(
             EventListenerCfg::default()
                 .default_input_listener(Duration::from_millis(20))
-                .port(Box::new(network_client), Duration::from_micros(100))
+                .port(Box::new(network_client), Duration::from_millis(10))
                 .poll_timeout(Duration::from_millis(10))
                 .tick_interval(Duration::from_secs(1)),
         );

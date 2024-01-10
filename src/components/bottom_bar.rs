@@ -1,6 +1,6 @@
-use tui_realm_stdlib::{Container, Label, Paragraph};
+use tui_realm_stdlib::{Container, Label};
 use tuirealm::{
-    props::{Color, Layout, TextModifiers, TextSpan},
+    props::{Color, Layout},
     tui::layout::Constraint,
     Component, MockComponent,
 };
@@ -43,7 +43,7 @@ impl BottomBar {
 
     pub fn new() -> Self {
         let container = Container::default()
-            .title("Logs", tuirealm::props::Alignment::Left)
+            .title("Network Logs", tuirealm::props::Alignment::Left)
             .layout(
                 Layout::default()
                     .constraints(&[Constraint::Percentage(100)])

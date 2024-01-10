@@ -4,6 +4,11 @@ use crate::grpc::server::{grpc_client, PingRequest};
 
 use tuirealm::listener::Poll;
 
+use super::{
+    types::{self, ClientConfig},
+    utils,
+};
+
 #[derive(PartialEq, Eq, PartialOrd, Clone)]
 pub enum UserEvent {
     Pong,
@@ -15,23 +20,29 @@ pub enum Request {
     Ping,
 }
 
-const SERVER_ADDRESS: &str = "http://127.0.0.1:6969";
-
 #[derive(Clone)]
 pub struct NetworkClient {
     messsages: Arc<Mutex<Vec<UserEvent>>>,
+    client_id: Option<String>,
 }
 
 impl NetworkClient {
     #[tokio::main(flavor = "current_thread")]
-    pub async fn start_network_client(self, message_receiver: mpsc::Receiver<Request>) {
-        let mut client = match grpc_client::GrpcClient::connect(SERVER_ADDRESS).await {
+    pub async fn start_network_client(
+        &mut self,
+        message_receiver: mpsc::Receiver<Request>,
+        config: ClientConfig,
+    ) {
+        let mut client = match grpc_client::GrpcClient::connect(config.server_url.clone()).await {
             Ok(grpc_client) => {
-                let message =
-                    format!("Successfully connected to server at address {SERVER_ADDRESS}");
+                let message = format!(
+                    "Successfully connected to server at address {}",
+                    config.server_url
+                );
                 self.push_user_event(UserEvent::InfoMessage(message));
                 grpc_client
             }
+
             Err(network_error) => {
                 let error = format!("Connection to server failed {network_error:?}");
                 self.messsages
@@ -41,6 +52,15 @@ impl NetworkClient {
                 return ();
             }
         };
+
+        let local_storage = utils::read_local_storage::<types::LocalStorage>("~/.local/state/");
+
+        let ping_request = PingRequest {
+            client_id: local_storage.and_then(|user_details| user_details.client_id),
+        };
+
+        let pong = client.ping(ping_request).await.unwrap();
+        self.client_id = Some(pong.get_ref().client_id.clone());
 
         while let Ok(message) = message_receiver.recv() {
             match message {
@@ -60,6 +80,7 @@ impl NetworkClient {
     pub fn new() -> Self {
         Self {
             messsages: Arc::new(Mutex::new(vec![])),
+            client_id: None,
         }
     }
 }
