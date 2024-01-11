@@ -36,9 +36,6 @@ impl Model {
 
         std::thread::spawn(move || network_client.start_network_client(grpc_receiver, config));
 
-        // Check network connectivity
-        grpc_sender.send(network::Request::Ping).unwrap();
-
         Self {
             app: Self::init_app(cloned_network_client),
             grpc_channel: grpc_sender,
@@ -85,7 +82,7 @@ impl Model {
 
         app.mount(
             Id::Menu,
-            Box::new(Menu::new(&["New", "Room", "Practice"])),
+            Box::new(Menu::new(&["New Game", "Create Room", "Join Room"])),
             Vec::default(),
         )
         .unwrap();
@@ -124,10 +121,7 @@ impl Update<Msg> for Model {
                 Msg::LetterCounterChanged(_v) => None,
                 Msg::StateUpdate => None,
                 Msg::PingServer => None,
-                Msg::SelectMenu => {
-                    self.grpc_channel.send(network::Request::Ping).unwrap();
-                    None
-                }
+                Msg::SelectMenu => None,
             }
         } else {
             None
