@@ -32,13 +32,12 @@ pub struct BottomBar {
 
 impl BottomBar {
     fn set_text(&mut self, text: String, message_type: MessageType) {
-        self.component.children.pop();
         let text_field = Box::new(
             Label::default()
                 .text(text)
                 .foreground(message_type.get_color()),
         );
-        self.component.children.push(text_field)
+        self.component.children[0] = text_field;
     }
 
     pub fn new() -> Self {
@@ -50,7 +49,7 @@ impl BottomBar {
                     .direction(tuirealm::tui::layout::Direction::Horizontal)
                     .margin(1),
             )
-            .children(vec![Box::new(Label::default().text("Gola"))]);
+            .children(vec![Box::new(Label::default())]);
 
         Self {
             component: container,

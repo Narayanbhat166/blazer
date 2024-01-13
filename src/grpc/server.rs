@@ -17,9 +17,16 @@ impl MyGrpc {
 impl grpc_server::Grpc for MyGrpc {
     async fn ping(
         &self,
-        _request: tonic::Request<PingRequest>,
+        request: tonic::Request<PingRequest>,
     ) -> Result<tonic::Response<PingResponse>, tonic::Status> {
-        log::info!("Received Request");
-        Err(tonic::Status::ok("All good"))
+        log::info!("{request:?}");
+        let request = request.into_inner();
+
+        let response = PingResponse {
+            client_id: request.client_id.unwrap_or("hola_client".to_string()),
+            client_name: Some("Hola".to_string()),
+        };
+
+        Ok(tonic::Response::new(response))
     }
 }
