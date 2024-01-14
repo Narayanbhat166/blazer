@@ -1,5 +1,11 @@
+use std::{fs, io::Write};
+
+use crate::grpc;
 use config::{Config, Environment, File, FileFormat};
+use fred::interfaces::ClientLike;
 use serde::Deserialize;
+
+use crate::app::types::RedisConfig;
 
 pub fn read_config<'a, T>(file_name: &str, env_prefix: Option<&str>) -> T
 where
@@ -17,17 +23,73 @@ where
     data.unwrap().try_deserialize().unwrap()
 }
 
+fn replace_home_dir(file_name: &str) -> String {
+    let path_buf = std::path::PathBuf::from(file_name);
+    path_buf
+        .into_iter()
+        .map(|dir| {
+            if dir == "~" {
+                std::env::var("HOME").unwrap()
+            } else {
+                dir.to_str().unwrap().to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// Read a file from local storage
 ///
 /// Return `None` if file is not present
-pub fn read_local_storage<'a, T>(file_name: &str) -> Option<T>
+pub fn read_local_storage<'de, T>(file_name: &str) -> Option<T>
 where
-    T: Deserialize<'a>,
+    T: serde::de::DeserializeOwned,
 {
-    let config_builder = Config::builder().add_source(File::new(file_name, FileFormat::Toml));
+    let file_name = replace_home_dir(file_name);
+    fs::read_to_string(file_name)
+        .ok()
+        .map(|file_contents| toml::from_str::<T>(&file_contents).expect("Invalid data in file"))
+}
 
-    // Unwrap here because config details must not be wrong
-    let data = config_builder.build();
+/// Write the given string to file in local storage
+///
+/// Create the file if it does not exist
+pub fn write_local_storage<'a, T>(file_name: &str, data: T)
+where
+    T: serde::Serialize,
+{
+    let file_name = replace_home_dir(file_name);
+    let file_contents = toml::to_string(&data).expect("Cannot convert data to toml representation");
 
-    data.ok().map(|data| data.try_deserialize().unwrap())
+    if fs::write(&file_name, file_contents.as_bytes()).is_err() {
+        let mut file = fs::File::create(file_name).expect("Cannot create the file");
+        file.write_all(file_contents.as_bytes())
+            .expect("Cannot write to file");
+    }
+}
+
+pub async fn create_redis_client(
+    redis_config: RedisConfig,
+) -> Result<grpc::redis_client::RedisClient, fred::error::RedisError> {
+    let config = fred::types::RedisConfig {
+        server: fred::types::ServerConfig::Centralized {
+            server: fred::types::Server {
+                host: redis_config.host.into(),
+                port: redis_config.port,
+            },
+        },
+        username: redis_config.username,
+        password: redis_config.password,
+        ..fred::types::RedisConfig::default()
+    };
+
+    let client = fred::clients::RedisClient::new(config, None, None, None);
+
+    // connect to the server, returning a handle to a task that drives the connection
+    let _ = client.connect();
+
+    // wait for the client to connect
+    let _ = client.wait_for_connect().await.unwrap();
+
+    Ok(grpc::redis_client::RedisClient::new(client))
 }

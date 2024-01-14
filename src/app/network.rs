@@ -35,12 +35,12 @@ impl<U> DisplayNetworkError for Result<tonic::Response<U>, tonic::Status> {
         match self {
             Ok(res) => Ok(res.into_inner()),
             Err(tonic_status) => {
-                let stringified_error = tonic_status.to_string();
+                let stringified_error = tonic_status.message();
                 network_client
                     .messsages
                     .lock()
                     .unwrap()
-                    .push(UserEvent::NetworkError(stringified_error));
+                    .push(UserEvent::NetworkError(stringified_error.to_string()));
                 Err(())
             }
         }
@@ -74,7 +74,9 @@ impl NetworkClient {
             }
         };
 
-        let local_storage = utils::read_local_storage::<types::LocalStorage>("~/.local/state/");
+        // Read the client details from ~/.local/state/blazerapp.toml for a returning user
+        let local_storage =
+            utils::read_local_storage::<types::LocalStorage>("~/.local/state/blazerapp.toml");
 
         let ping_request = PingRequest {
             client_id: local_storage.and_then(|user_details| user_details.client_id),
@@ -85,7 +87,14 @@ impl NetworkClient {
         ping_result
             .error_handler(&self)
             .and_then(|ping_response| {
-                self.client_id = Some(ping_response.client_id);
+                let client_id = ping_response.client_id;
+
+                // Write the client_id / user_id to localstorage data to persist session
+                let local_storage_data = types::LocalStorage::new(client_id.clone());
+                utils::write_local_storage("~/.local/state/blazerapp.toml", local_storage_data);
+
+                self.client_id = Some(client_id);
+
                 Ok(())
             })
             .ok();
