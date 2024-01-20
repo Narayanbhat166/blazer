@@ -87,4 +87,19 @@ impl RedisClient {
         let user_id = user.user_id.clone();
         self.serialize_and_set(user_id, user).await
     }
+
+    pub async fn insert_room(&self, room: models::Room) -> DbResult<models::Room> {
+        let room_id = room.room_id.clone();
+        self.serialize_and_set(room_id, room).await
+    }
+
+    pub async fn get_room_optional(&self, room_id: String) -> DbResult<Option<models::Room>> {
+        let res = self.get_and_deserialize::<_, models::Room>(room_id).await;
+
+        match res {
+            Ok(room) => Ok(Some(room)),
+            Err(error) if error.is_not_found() => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
 }

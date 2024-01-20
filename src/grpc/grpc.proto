@@ -4,6 +4,22 @@ package server;
 
 service Grpc {
     rpc Ping (PingRequest) returns (PingResponse);
+    rpc CreateRoom (CreateRoomRequest) returns (stream CreateRoomResponse);
+}
+
+message CreateRoomRequest {
+    enum RequestType {
+        CreateRoom = 0;
+        JoinRoom = 1;
+    }
+    string client_id = 1;
+    optional string room_id = 2;
+    RequestType request_type = 3;
+}
+
+message CreateRoomResponse {
+    optional string room_id = 1;
+    bool start_game = 2;
 }
 
 message PingRequest {
@@ -12,9 +28,5 @@ message PingRequest {
 
 message PingResponse {
     string client_id = 1;
-    optional string client_name = 2;    
+    optional string client_name = 2;
 }
-
-
-
-
