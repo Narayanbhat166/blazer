@@ -118,18 +118,27 @@ impl NetworkClient {
                     let cloned_self = self.clone();
 
                     match room_stream {
-                        Ok(mut stream) => {
-                            tokio::spawn(async move {
-                                while let Some(stream_message) = stream.next().await {
-                                    let inner_message = stream_message.unwrap();
+                        Ok(stream) => {
+                            let mut stream = stream.take(2);
+                            while let Some(stream_message) = stream.next().await {
+                                let inner_message = stream_message;
 
-                                    if inner_message.start_game {
-                                        cloned_self.push_user_event(UserEvent::GameStart)
-                                    } else {
-                                        cloned_self.push_user_event(UserEvent::RoomCreated)
+                                match inner_message {
+                                    Ok(message) => {
+                                        if message.start_game {
+                                            cloned_self.push_user_event(UserEvent::GameStart)
+                                        } else {
+                                            cloned_self.push_user_event(UserEvent::RoomCreated)
+                                        }
+                                    }
+                                    Err(error) => {
+                                        let stringified_error = error.message();
+                                        self.messsages.lock().unwrap().push(
+                                            UserEvent::NetworkError(stringified_error.to_string()),
+                                        );
                                     }
                                 }
-                            });
+                            }
                         }
                         Err(_) => todo!(),
                     }
