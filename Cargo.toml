@@ -24,6 +24,7 @@ uuid = { version = "1.6.1", features = ["v4"] }
 toml = "0.8.8"
 tokio-stream = "0.1.14"
 rand = "0.8.5"
+error-stack = "0.4.1"
 
 [build-dependencies]
 tonic-build = "0.7"

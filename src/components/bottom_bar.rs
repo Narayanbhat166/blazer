@@ -73,6 +73,18 @@ impl Component<Msg, UserEvent> for BottomBar {
                     self.set_text(network_error, MessageType::Error);
                     Some(Msg::StateUpdate)
                 }
+                UserEvent::RoomCreated => {
+                    self.set_text(
+                        "The luxury double bedroom has been created, Waiting for your partner"
+                            .to_string(),
+                        MessageType::Info,
+                    );
+                    Some(Msg::StateUpdate)
+                }
+                UserEvent::GameStart => {
+                    self.set_text("Game will start now".to_string(), MessageType::Info);
+                    Some(Msg::StateUpdate)
+                }
             },
             _ => None,
         }

@@ -24,7 +24,7 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let addr = server_address.parse().unwrap();
 
-    let server = MyGrpc::new(redis_client);
+    let server = MyGrpc::new(redis_client).await;
     log::info!("Server successfully running on {:?}", addr);
 
     tonic::transport::Server::builder()

@@ -121,7 +121,10 @@ impl Update<Msg> for Model {
                 Msg::LetterCounterChanged(_v) => None,
                 Msg::StateUpdate => None,
                 Msg::PingServer => None,
-                Msg::SelectMenu => None,
+                Msg::SelectMenu => {
+                    self.grpc_channel.send(network::Request::NewGame).unwrap();
+                    None
+                }
             }
         } else {
             None

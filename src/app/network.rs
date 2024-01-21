@@ -1,7 +1,8 @@
 use std::sync::{mpsc, Arc, Mutex};
 
-use crate::grpc::server::{grpc_client, PingRequest};
+use crate::grpc::server::{grpc_client, CreateRoomRequest, PingRequest};
 
+use tokio_stream::StreamExt;
 use tuirealm::listener::Poll;
 
 use super::{
@@ -14,9 +15,13 @@ pub enum UserEvent {
     Pong,
     InfoMessage(String),
     NetworkError(String),
+    RoomCreated,
+    GameStart,
 }
 
-pub enum Request {}
+pub enum Request {
+    NewGame,
+}
 
 #[derive(Clone)]
 pub struct NetworkClient {
@@ -100,7 +105,36 @@ impl NetworkClient {
             .ok();
 
         while let Ok(message) = message_receiver.recv() {
-            match message {}
+            match message {
+                Request::NewGame => {
+                    let room_request = CreateRoomRequest {
+                        client_id: self.client_id.clone().unwrap(),
+                        room_id: None,
+                        request_type: 1,
+                    };
+
+                    let room_stream = client.create_room(room_request).await.error_handler(&self);
+
+                    let cloned_self = self.clone();
+
+                    match room_stream {
+                        Ok(mut stream) => {
+                            tokio::spawn(async move {
+                                while let Some(stream_message) = stream.next().await {
+                                    let inner_message = stream_message.unwrap();
+
+                                    if inner_message.start_game {
+                                        cloned_self.push_user_event(UserEvent::GameStart)
+                                    } else {
+                                        cloned_self.push_user_event(UserEvent::RoomCreated)
+                                    }
+                                }
+                            });
+                        }
+                        Err(_) => todo!(),
+                    }
+                }
+            }
         }
     }
 

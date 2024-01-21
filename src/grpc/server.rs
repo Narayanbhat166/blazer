@@ -12,7 +12,7 @@ use rand::Rng;
 use tokio::sync::mpsc;
 
 use crate::{
-    app::errors,
+    app::errors::{self, ResultExtApp},
     grpc::{models, redis_client::RedisClient},
 };
 
@@ -32,16 +32,32 @@ pub struct MyGrpc {
 }
 
 const COMMON_ROOM: &str = "COMMON_ROOM_KEY";
+const COMMON_ROOM_SIZE: u8 = 2;
 
 impl MyGrpc {
-    pub fn new(redis_client: RedisClient) -> Self {
+    pub async fn new(redis_client: RedisClient) -> Self {
+        // Create the common room if not exists
+
+        let common_room = redis_client
+            .get_room_optional(COMMON_ROOM.to_owned())
+            .await
+            .unwrap();
+
+        if common_room.is_none() {
+            let common_room = models::Room::new(COMMON_ROOM.to_string(), COMMON_ROOM_SIZE);
+            redis_client.insert_room(common_room).await.unwrap();
+            log::info!("Created a common room");
+        } else {
+            log::info!("Common room already exists");
+        }
+
         Self {
             redis_client,
             connected_users: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
     }
 
-    pub fn insert_user(&self, user_id: String, sender_channel: mpsc::Sender<Message>) {
+    pub fn insert_user_channel(&self, user_id: String, sender_channel: mpsc::Sender<Message>) {
         let mut connected_users = self.connected_users.lock().unwrap();
         connected_users.insert(user_id, sender_channel);
     }
@@ -71,20 +87,29 @@ impl grpc_server::Grpc for MyGrpc {
         let optional_user_id = request.client_id;
 
         let ping_response = match optional_user_id {
-            Some(user_id) => self
-                .redis_client
-                .get_user_optional(user_id)
-                .await?
-                .map(|user| PingResponse {
-                    client_id: user.user_id,
-                    client_name: user.user_name,
-                })
-                .ok_or(errors::DbError::NotFound)?,
+            Some(user_id) => {
+                let db_user = self
+                    .redis_client
+                    .get_user(user_id.clone())
+                    .await
+                    .to_not_found(errors::ApiError::UserNotFound {
+                        user_id: user_id.clone(),
+                    })?;
+
+                PingResponse {
+                    client_id: db_user.user_id,
+                    client_name: db_user.user_name,
+                }
+            }
             None => {
                 // Create new user
                 let user_uuid = uuid::Uuid::new_v4().as_simple().to_string();
-                let new_user = models::User::new(user_uuid);
-                let db_user = self.redis_client.insert_user(new_user).await?;
+                let new_user = models::User::new(user_uuid.clone());
+                let db_user = self
+                    .redis_client
+                    .insert_user(new_user)
+                    .await
+                    .to_duplicate(errors::ApiError::UserAlreadyExists { user_id: user_uuid })?;
 
                 PingResponse {
                     client_id: db_user.user_id,
@@ -117,27 +142,26 @@ impl grpc_server::Grpc for MyGrpc {
                     rng.gen_range(100000..1000000).to_string()
                 });
 
-                // If the room already exists then the client must retry
-                if self
-                    .redis_client
-                    .get_room_optional(room_id.clone())
-                    .await?
-                    .is_some()
-                {
-                    Err(tonic::Status::new(
-                        tonic::Code::AlreadyExists,
-                        format!("The room with the id {room_id} already exists"),
-                    ))?
-                }
+                // If the room already exists then the client must retry with a different room_id
+                self.redis_client
+                    .get_room(room_id.clone())
+                    .await
+                    .to_duplicate(errors::ApiError::RoomAlreadyExists {
+                        room_id: room_id.clone(),
+                    })?;
 
                 let room = models::Room::new(room_id, 2);
-                let db_room = self.redis_client.insert_room(room).await?;
+                let db_room = self
+                    .redis_client
+                    .insert_room(room)
+                    .await
+                    .to_internal_api_error()?;
 
                 tx.send(Message::RoomCreated(db_room.room_id))
                     .await
                     .unwrap();
 
-                self.insert_user(user_id, tx);
+                self.insert_user_channel(user_id, tx);
             }
             1 => {
                 // Join the room
@@ -146,16 +170,21 @@ impl grpc_server::Grpc for MyGrpc {
 
                 let mut room = self
                     .redis_client
-                    .get_room_optional(room_id.clone())
-                    .await?
-                    .ok_or(errors::DbError::NotFound)?;
+                    .get_room(room_id.clone())
+                    .await
+                    .to_not_found(errors::ApiError::RoomNotFound {
+                        room_id: room_id.clone(),
+                    })?;
 
-                let room_size = room.add_user(user_id);
+                let room_size = room.add_user(user_id.clone());
                 let room_max_capacity = room.room_size;
                 let user_ids = room.users.clone();
 
                 // Update the room
-                self.redis_client.insert_room(room).await?;
+                self.redis_client
+                    .insert_room(room)
+                    .await
+                    .to_internal_api_error()?;
 
                 if room_size == room_max_capacity as usize {
                     // The game can be started
@@ -168,7 +197,12 @@ impl grpc_server::Grpc for MyGrpc {
                             .unwrap();
                     }
                 } else {
+                    tx.send(Message::RoomCreated(COMMON_ROOM.to_string()))
+                        .await
+                        .unwrap();
                 }
+
+                self.insert_user_channel(user_id, tx);
             }
             _ => {
                 // Invalid request

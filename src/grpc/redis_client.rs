@@ -83,6 +83,20 @@ impl RedisClient {
         }
     }
 
+    pub async fn get_user(&self, user_id: String) -> DbResult<models::User> {
+        let res = self.get_and_deserialize::<_, models::User>(user_id).await;
+        match res {
+            Ok(user) => Ok(user),
+            Err(db_error) => {
+                if db_error.is_not_found() {
+                    Err(errors::DbError::NotFound)
+                } else {
+                    Err(db_error)
+                }
+            }
+        }
+    }
+
     pub async fn insert_user(&self, user: models::User) -> DbResult<models::User> {
         let user_id = user.user_id.clone();
         self.serialize_and_set(user_id, user).await
@@ -101,5 +115,9 @@ impl RedisClient {
             Err(error) if error.is_not_found() => Ok(None),
             Err(error) => Err(error),
         }
+    }
+
+    pub async fn get_room(&self, room_id: String) -> DbResult<models::Room> {
+        self.get_and_deserialize::<_, models::Room>(room_id).await
     }
 }
