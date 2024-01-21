@@ -26,7 +26,7 @@ where
 fn replace_home_dir(file_name: &str) -> String {
     let path_buf = std::path::PathBuf::from(file_name);
     path_buf
-        .into_iter()
+        .iter()
         .map(|dir| {
             if dir == "~" {
                 std::env::var("HOME").unwrap()
@@ -41,7 +41,7 @@ fn replace_home_dir(file_name: &str) -> String {
 /// Read a file from local storage
 ///
 /// Return `None` if file is not present
-pub fn read_local_storage<'de, T>(file_name: &str) -> Option<T>
+pub fn read_local_storage<T>(file_name: &str) -> Option<T>
 where
     T: serde::de::DeserializeOwned,
 {
@@ -54,7 +54,7 @@ where
 /// Write the given string to file in local storage
 ///
 /// Create the file if it does not exist
-pub fn write_local_storage<'a, T>(file_name: &str, data: T)
+pub fn write_local_storage<T>(file_name: &str, data: T)
 where
     T: serde::Serialize,
 {
@@ -86,10 +86,10 @@ pub async fn create_redis_client(
     let client = fred::clients::RedisClient::new(config, None, None, None);
 
     // connect to the server, returning a handle to a task that drives the connection
-    let _ = client.connect();
+    let _ = client.connect().await;
 
     // wait for the client to connect
-    let _ = client.wait_for_connect().await.unwrap();
+    client.wait_for_connect().await.unwrap();
 
     Ok(grpc::redis_client::RedisClient::new(client))
 }

@@ -31,14 +31,14 @@ pub struct NetworkClient {
 
 pub trait DisplayNetworkError {
     type Item;
-    fn error_handler(self, network_client: &NetworkClient) -> Result<Self::Item, ()>;
+    fn error_handler(self, network_client: &NetworkClient) -> Option<Self::Item>;
 }
 
 impl<U> DisplayNetworkError for Result<tonic::Response<U>, tonic::Status> {
     type Item = U;
-    fn error_handler(self, network_client: &NetworkClient) -> Result<Self::Item, ()> {
+    fn error_handler(self, network_client: &NetworkClient) -> Option<Self::Item> {
         match self {
-            Ok(res) => Ok(res.into_inner()),
+            Ok(res) => Some(res.into_inner()),
             Err(tonic_status) => {
                 let stringified_error = tonic_status.message();
                 network_client
@@ -46,8 +46,17 @@ impl<U> DisplayNetworkError for Result<tonic::Response<U>, tonic::Status> {
                     .lock()
                     .unwrap()
                     .push(UserEvent::NetworkError(stringified_error.to_string()));
-                Err(())
+                None
             }
+        }
+    }
+}
+
+impl Default for NetworkClient {
+    fn default() -> Self {
+        Self {
+            messsages: Arc::new(Mutex::new(vec![])),
+            client_id: None,
         }
     }
 }
@@ -75,7 +84,9 @@ impl NetworkClient {
                     .lock()
                     .unwrap()
                     .push(UserEvent::NetworkError(error));
-                return ();
+
+                // Add the retry logic for exponential retry
+                return;
             }
         };
 
@@ -89,20 +100,15 @@ impl NetworkClient {
 
         let ping_result = client.ping(ping_request).await;
 
-        ping_result
-            .error_handler(&self)
-            .and_then(|ping_response| {
-                let client_id = ping_response.client_id;
+        if let Some(ping_response) = ping_result.error_handler(self) {
+            let client_id = ping_response.client_id;
 
-                // Write the client_id / user_id to localstorage data to persist session
-                let local_storage_data = types::LocalStorage::new(client_id.clone());
-                utils::write_local_storage("~/.local/state/blazerapp.toml", local_storage_data);
+            // Write the client_id / user_id to localstorage data to persist session
+            let local_storage_data = types::LocalStorage::new(client_id.clone());
+            utils::write_local_storage("~/.local/state/blazerapp.toml", local_storage_data);
 
-                self.client_id = Some(client_id);
-
-                Ok(())
-            })
-            .ok();
+            self.client_id = Some(client_id);
+        }
 
         while let Ok(message) = message_receiver.recv() {
             match message {
@@ -113,21 +119,23 @@ impl NetworkClient {
                         request_type: 1,
                     };
 
-                    let room_stream = client.create_room(room_request).await.error_handler(&self);
+                    let room_stream = client.create_room(room_request).await.error_handler(self);
 
                     let cloned_self = self.clone();
 
                     match room_stream {
-                        Ok(stream) => {
-                            let mut stream = stream.take(2);
+                        Some(mut stream) => {
                             while let Some(stream_message) = stream.next().await {
                                 let inner_message = stream_message;
 
                                 match inner_message {
                                     Ok(message) => {
                                         if message.start_game {
-                                            cloned_self.push_user_event(UserEvent::GameStart)
+                                            cloned_self.push_user_event(UserEvent::GameStart);
+                                            // Break the loop and disconnect the client as this stream is no longer needed
+                                            break;
                                         } else {
+                                            // Since the game has not yet begun, wait for next message and do not break the loop
                                             cloned_self.push_user_event(UserEvent::RoomCreated)
                                         }
                                     }
@@ -140,7 +148,9 @@ impl NetworkClient {
                                 }
                             }
                         }
-                        Err(_) => todo!(),
+                        None => {
+                            // This can happen in case the server panics
+                        }
                     }
                 }
             }
@@ -149,13 +159,6 @@ impl NetworkClient {
 
     fn push_user_event(&self, event: UserEvent) {
         self.messsages.lock().unwrap().push(event)
-    }
-
-    pub fn new() -> Self {
-        Self {
-            messsages: Arc::new(Mutex::new(vec![])),
-            client_id: None,
-        }
     }
 }
 

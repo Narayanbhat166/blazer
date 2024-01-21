@@ -134,6 +134,8 @@ impl grpc_server::Grpc for MyGrpc {
         let (response_sender, response_receiver) = mpsc::channel(128);
         let (tx, mut rx) = mpsc::channel::<Message>(10);
 
+        self.insert_user_channel(user_id.clone(), tx.clone());
+
         match request_type {
             0 => {
                 // Create Room
@@ -160,14 +162,13 @@ impl grpc_server::Grpc for MyGrpc {
                 tx.send(Message::RoomCreated(db_room.room_id))
                     .await
                     .unwrap();
-
-                self.insert_user_channel(user_id, tx);
             }
             1 => {
                 // Join the room
                 // This can also be used to join the common room by not passing the `room_id`
                 let room_id = request.room_id.unwrap_or(COMMON_ROOM.to_string());
 
+                // The room should already exist, or else return an error
                 let mut room = self
                     .redis_client
                     .get_room(room_id.clone())
@@ -176,19 +177,20 @@ impl grpc_server::Grpc for MyGrpc {
                         room_id: room_id.clone(),
                     })?;
 
+                // Add the current user to the room
                 let room_size = room.add_user(user_id.clone());
                 let room_max_capacity = room.room_size;
-                let user_ids = room.users.clone();
+                let users_in_the_room = room.users.clone();
 
-                // Update the room
+                // Update the room in database
                 self.redis_client
                     .insert_room(room)
                     .await
                     .to_internal_api_error()?;
 
                 if room_size == room_max_capacity as usize {
-                    // The game can be started
-                    let user_ids = user_ids;
+                    // The game can be started, inform all the connected users of this room
+                    let user_ids = users_in_the_room;
                     for user_id in user_ids {
                         self.get_user_channel(user_id)
                             .await
@@ -201,25 +203,30 @@ impl grpc_server::Grpc for MyGrpc {
                         .await
                         .unwrap();
                 }
-
-                self.insert_user_channel(user_id, tx);
             }
             _ => {
                 // Invalid request
             }
         };
 
+        // This spawns a tokio task which reads from the channel and writes to the server stream
         tokio::spawn(async move {
             while let Some(item) = rx.recv().await {
-                let response = match item {
-                    Message::GameStart(room_id) => Some(CreateRoomResponse {
-                        room_id: Some(room_id),
-                        start_game: true,
-                    }),
-                    Message::RoomCreated(room_id) => Some(CreateRoomResponse {
-                        room_id: Some(room_id),
-                        start_game: false,
-                    }),
+                let (response, should_close_stream) = match item {
+                    Message::GameStart(room_id) => (
+                        Some(CreateRoomResponse {
+                            room_id: Some(room_id),
+                            start_game: true,
+                        }),
+                        true,
+                    ),
+                    Message::RoomCreated(room_id) => (
+                        Some(CreateRoomResponse {
+                            room_id: Some(room_id),
+                            start_game: false,
+                        }),
+                        false,
+                    ),
                 };
 
                 if let Some(response) = response {
@@ -227,11 +234,14 @@ impl grpc_server::Grpc for MyGrpc {
                         .send(Result::<_, tonic::Status>::Ok(response))
                         .await
                     {
-                        Ok(_) => {
-                            // item (server response) was queued to be send to client
+                        Ok(()) => {
+                            if should_close_stream {
+                                // Break the loop and close this stream, drop the receiver and sender
+                                break;
+                            }
                         }
                         Err(_item) => {
-                            // output_stream was build from rx and both are dropped
+                            // output_stream was built from rx and both are dropped
                             break;
                         }
                     }

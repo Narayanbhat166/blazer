@@ -30,17 +30,8 @@ pub struct BottomBar {
     component: tui_realm_stdlib::Container,
 }
 
-impl BottomBar {
-    fn set_text(&mut self, text: String, message_type: MessageType) {
-        let text_field = Box::new(
-            Label::default()
-                .text(text)
-                .foreground(message_type.get_color()),
-        );
-        self.component.children[0] = text_field;
-    }
-
-    pub fn new() -> Self {
+impl Default for BottomBar {
+    fn default() -> Self {
         let container = Container::default()
             .title("Network Logs", tuirealm::props::Alignment::Left)
             .layout(
@@ -49,11 +40,22 @@ impl BottomBar {
                     .direction(tuirealm::tui::layout::Direction::Horizontal)
                     .margin(1),
             )
-            .children(vec![Box::new(Label::default())]);
+            .children(vec![Box::<Label>::default()]);
 
         Self {
             component: container,
         }
+    }
+}
+
+impl BottomBar {
+    fn set_text(&mut self, text: String, message_type: MessageType) {
+        let text_field = Box::new(
+            Label::default()
+                .text(text)
+                .foreground(message_type.get_color()),
+        );
+        self.component.children[0] = text_field;
     }
 }
 

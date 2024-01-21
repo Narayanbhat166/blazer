@@ -31,7 +31,7 @@ impl Model {
         let (grpc_sender, grpc_receiver) = mpsc::channel::<network::Request>();
         // start the network client
 
-        let mut network_client = NetworkClient::new();
+        let mut network_client = NetworkClient::default();
         let cloned_network_client = network_client.clone();
 
         std::thread::spawn(move || network_client.start_network_client(grpc_receiver, config));
@@ -65,8 +65,7 @@ impl Model {
                     )
                     .split(f.size());
                 self.app.view(&Id::Menu, f, chunks[0]);
-                self.app
-                    .view(&Id::BottomBar, f, chunks.last().unwrap().clone());
+                self.app.view(&Id::BottomBar, f, *chunks.last().unwrap());
             })
             .is_ok());
     }
@@ -89,7 +88,7 @@ impl Model {
 
         app.mount(
             Id::BottomBar,
-            Box::new(BottomBar::new()),
+            Box::<BottomBar>::default(),
             vec![tuirealm::Sub::new(
                 tuirealm::SubEventClause::Any,
                 tuirealm::SubClause::Always,
