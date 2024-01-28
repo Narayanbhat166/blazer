@@ -79,12 +79,8 @@ impl Model {
                 .tick_interval(Duration::from_secs(1)),
         );
 
-        app.mount(
-            Id::Menu,
-            Box::new(Menu::new(&["New Game", "Create Room", "Join Room"])),
-            Vec::default(),
-        )
-        .unwrap();
+        app.mount(Id::Menu, Box::new(Menu::default()), Vec::default())
+            .unwrap();
 
         app.mount(
             Id::BottomBar,
@@ -114,14 +110,20 @@ impl Update<Msg> for Model {
                     None
                 }
                 Msg::Clock => None,
-                Msg::DigitCounterBlur => None,
-                Msg::DigitCounterChanged(_v) => None,
-                Msg::LetterCounterBlur => None,
-                Msg::LetterCounterChanged(_v) => None,
                 Msg::StateUpdate => None,
                 Msg::PingServer => None,
-                Msg::SelectMenu => {
-                    self.grpc_channel.send(network::Request::NewGame).unwrap();
+                Msg::SelectMenu(menu_state) => {
+                    let network_request = match menu_state {
+                        crate::components::menu::Menus::NewGame => {
+                            network::Request::New(network::NewRequestEntity::Game)
+                        }
+                        crate::components::menu::Menus::CreateRoom => {
+                            network::Request::New(network::NewRequestEntity::Room)
+                        }
+                        crate::components::menu::Menus::JoinRoom => todo!(),
+                    };
+
+                    self.grpc_channel.send(network_request).unwrap();
                     None
                 }
             }

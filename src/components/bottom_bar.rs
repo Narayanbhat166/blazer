@@ -75,12 +75,16 @@ impl Component<Msg, UserEvent> for BottomBar {
                     self.set_text(network_error, MessageType::Error);
                     Some(Msg::StateUpdate)
                 }
-                UserEvent::RoomCreated => {
-                    self.set_text(
+                UserEvent::RoomCreated { room_id } => {
+                    let text_message = if let Some(room_id) = room_id {
+                        format!("The luxury double bedroom with room number {room_id} has been created , Waiting for your partner")
+                    } else {
                         "The luxury double bedroom has been created, Waiting for your partner"
-                            .to_string(),
-                        MessageType::Info,
-                    );
+                            .to_string()
+                    };
+
+                    self.set_text(text_message, MessageType::Success);
+
                     Some(Msg::StateUpdate)
                 }
                 UserEvent::GameStart => {

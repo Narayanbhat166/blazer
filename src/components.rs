@@ -1,5 +1,5 @@
 pub mod bottom_bar;
-pub mod counter;
+// pub mod counter;
 pub mod menu;
 
 // Let's define the messages handled by our app. NOTE: it must derive `PartialEq`
@@ -7,13 +7,9 @@ pub mod menu;
 pub enum Msg {
     AppClose,
     Clock,
-    DigitCounterChanged(isize),
-    DigitCounterBlur,
-    LetterCounterChanged(isize),
-    LetterCounterBlur,
     StateUpdate,
     PingServer,
-    SelectMenu,
+    SelectMenu(menu::Menus),
 }
 
 // Let's define the component ids for our application

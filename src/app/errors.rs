@@ -54,12 +54,18 @@ impl<T> ResultExtApp<T> for Result<T, DbError> {
         if let Err(DbError::DuplicateValue) = &self {
             self.map_err(|_| api_error)
         } else {
-            self.map_err(|_| ApiError::InternalServerError)
+            self.map_err(|error| {
+                tracing::error!(db_error=?error);
+                ApiError::InternalServerError
+            })
         }
     }
 
     fn to_internal_api_error(self) -> Result<T, ApiError> {
-        self.map_err(|_| ApiError::InternalServerError)
+        self.map_err(|error| {
+            tracing::error!(db_error=?error);
+            ApiError::InternalServerError
+        })
     }
 }
 

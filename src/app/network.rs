@@ -1,6 +1,6 @@
 use std::sync::{mpsc, Arc, Mutex};
 
-use crate::grpc::server::{grpc_client, CreateRoomRequest, PingRequest};
+use crate::grpc::server::{grpc_client, PingRequest, RoomServiceRequest};
 
 use tokio_stream::StreamExt;
 use tuirealm::listener::Poll;
@@ -15,12 +15,17 @@ pub enum UserEvent {
     Pong,
     InfoMessage(String),
     NetworkError(String),
-    RoomCreated,
+    RoomCreated { room_id: Option<String> },
     GameStart,
 }
 
+pub enum NewRequestEntity {
+    Room,
+    Game,
+}
+
 pub enum Request {
-    NewGame,
+    New(NewRequestEntity),
 }
 
 #[derive(Clone)]
@@ -112,14 +117,19 @@ impl NetworkClient {
 
         while let Ok(message) = message_receiver.recv() {
             match message {
-                Request::NewGame => {
-                    let room_request = CreateRoomRequest {
-                        client_id: self.client_id.clone().unwrap(),
-                        room_id: None,
-                        request_type: 1,
+                Request::New(request_type) => {
+                    let request_type = match request_type {
+                        NewRequestEntity::Room => 0,
+                        NewRequestEntity::Game => 1,
                     };
 
-                    let room_stream = client.create_room(room_request).await.error_handler(self);
+                    let room_request = RoomServiceRequest {
+                        client_id: self.client_id.clone().unwrap(),
+                        room_id: None,
+                        request_type,
+                    };
+
+                    let room_stream = client.room_service(room_request).await.error_handler(self);
 
                     let cloned_self = self.clone();
 
@@ -136,7 +146,9 @@ impl NetworkClient {
                                             break;
                                         } else {
                                             // Since the game has not yet begun, wait for next message and do not break the loop
-                                            cloned_self.push_user_event(UserEvent::RoomCreated)
+                                            cloned_self.push_user_event(UserEvent::RoomCreated {
+                                                room_id: message.room_id,
+                                            })
                                         }
                                     }
                                     Err(error) => {

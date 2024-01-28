@@ -4,7 +4,7 @@ use std::{
 };
 
 pub use blazer_grpc::{
-    grpc_client, grpc_server, CreateRoomRequest, CreateRoomResponse, PingRequest, PingResponse,
+    grpc_client, grpc_server, PingRequest, PingResponse, RoomServiceRequest, RoomServiceResponse,
 };
 
 use rand::Rng;
@@ -12,7 +12,7 @@ use rand::Rng;
 use tokio::sync::mpsc;
 
 use crate::{
-    app::errors::{self, ResultExtApp},
+    app::errors::{self, ApiError, ResultExtApp},
     grpc::{models, redis_client::RedisClient},
 };
 
@@ -22,7 +22,7 @@ mod blazer_grpc {
 }
 
 pub enum Message {
-    RoomCreated(String),
+    RoomCreated { room_id: Option<String> },
     GameStart(String),
 }
 
@@ -46,9 +46,9 @@ impl MyGrpc {
         if common_room.is_none() {
             let common_room = models::Room::new(COMMON_ROOM.to_string(), COMMON_ROOM_SIZE);
             redis_client.insert_room(common_room).await.unwrap();
-            log::info!("Created a common room");
+            tracing::info!("Created a common room");
         } else {
-            log::info!("Common room already exists");
+            tracing::info!("Common room already exists");
         }
 
         Self {
@@ -70,18 +70,18 @@ impl MyGrpc {
 }
 
 type CreateRoomStream = std::pin::Pin<
-    Box<dyn tokio_stream::Stream<Item = Result<CreateRoomResponse, tonic::Status>> + Send>,
+    Box<dyn tokio_stream::Stream<Item = Result<RoomServiceResponse, tonic::Status>> + Send>,
 >;
 
 #[tonic::async_trait]
 impl grpc_server::Grpc for MyGrpc {
-    type CreateRoomStream = CreateRoomStream;
+    type RoomServiceStream = CreateRoomStream;
 
     async fn ping(
         &self,
         request: tonic::Request<PingRequest>,
     ) -> Result<tonic::Response<PingResponse>, tonic::Status> {
-        log::info!("{request:?}");
+        tracing::info!("{request:?}");
         let request = request.into_inner();
 
         let optional_user_id = request.client_id;
@@ -121,11 +121,11 @@ impl grpc_server::Grpc for MyGrpc {
         Ok(tonic::Response::new(ping_response))
     }
 
-    async fn create_room(
+    async fn room_service(
         &self,
-        request: tonic::Request<CreateRoomRequest>,
-    ) -> Result<tonic::Response<Self::CreateRoomStream>, tonic::Status> {
-        log::info!("{request:?}");
+        request: tonic::Request<RoomServiceRequest>,
+    ) -> Result<tonic::Response<Self::RoomServiceStream>, tonic::Status> {
+        tracing::info!("{request:?}");
         let request = request.into_inner();
 
         let request_type = request.request_type;
@@ -135,6 +135,7 @@ impl grpc_server::Grpc for MyGrpc {
         let (tx, mut rx) = mpsc::channel::<Message>(10);
 
         self.insert_user_channel(user_id.clone(), tx.clone());
+        tracing::error!(request_type);
 
         match request_type {
             0 => {
@@ -145,23 +146,27 @@ impl grpc_server::Grpc for MyGrpc {
                 });
 
                 // If the room already exists then the client must retry with a different room_id
-                self.redis_client
-                    .get_room(room_id.clone())
-                    .await
-                    .to_duplicate(errors::ApiError::RoomAlreadyExists {
-                        room_id: room_id.clone(),
-                    })?;
+                match self.redis_client.get_room(room_id.clone()).await {
+                    Ok(_) => Err(ApiError::RoomAlreadyExists { room_id })?,
+                    Err(error) => {
+                        if error.is_not_found() {
+                            let room = models::Room::new(room_id, 2);
+                            let db_room = self
+                                .redis_client
+                                .insert_room(room)
+                                .await
+                                .to_internal_api_error()?;
 
-                let room = models::Room::new(room_id, 2);
-                let db_room = self
-                    .redis_client
-                    .insert_room(room)
-                    .await
-                    .to_internal_api_error()?;
-
-                tx.send(Message::RoomCreated(db_room.room_id))
-                    .await
-                    .unwrap();
+                            tx.send(Message::RoomCreated {
+                                room_id: Some(db_room.room_id),
+                            })
+                            .await
+                            .unwrap();
+                        } else {
+                            Err(error).to_internal_api_error()?
+                        }
+                    }
+                }
             }
             1 => {
                 // Join the room
@@ -199,7 +204,7 @@ impl grpc_server::Grpc for MyGrpc {
                             .unwrap();
                     }
                 } else {
-                    tx.send(Message::RoomCreated(COMMON_ROOM.to_string()))
+                    tx.send(Message::RoomCreated { room_id: None })
                         .await
                         .unwrap();
                 }
@@ -214,15 +219,15 @@ impl grpc_server::Grpc for MyGrpc {
             while let Some(item) = rx.recv().await {
                 let (response, should_close_stream) = match item {
                     Message::GameStart(room_id) => (
-                        Some(CreateRoomResponse {
+                        Some(RoomServiceResponse {
                             room_id: Some(room_id),
                             start_game: true,
                         }),
                         true,
                     ),
-                    Message::RoomCreated(room_id) => (
-                        Some(CreateRoomResponse {
-                            room_id: Some(room_id),
+                    Message::RoomCreated { room_id } => (
+                        Some(RoomServiceResponse {
+                            room_id: room_id,
                             start_game: false,
                         }),
                         false,
@@ -252,7 +257,7 @@ impl grpc_server::Grpc for MyGrpc {
 
         let output_stream = tokio_stream::wrappers::ReceiverStream::new(response_receiver);
         Ok(tonic::Response::new(
-            Box::pin(output_stream) as Self::CreateRoomStream
+            Box::pin(output_stream) as Self::RoomServiceStream
         ))
     }
 }

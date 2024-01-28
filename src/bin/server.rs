@@ -6,10 +6,8 @@ use blazer::{
 // Single threaded runtime
 #[tokio::main(flavor = "current_thread")]
 pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::builder()
-        .filter_level(log::LevelFilter::Info)
-        .format_target(true)
-        .init();
+    let subscriber = tracing_subscriber::FmtSubscriber::new();
+    tracing::subscriber::set_global_default(subscriber)?;
 
     let config =
         utils::read_config::<types::ServerConfig>("server_config.toml", Some("BLAZER_SERVER"));
@@ -23,9 +21,10 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let server_address = format!("{}:{}", server_config.host, server_config.port);
 
     let addr = server_address.parse().unwrap();
+    tracing::info!("Attempting to run server on {:?}", addr);
 
     let server = MyGrpc::new(redis_client).await;
-    log::info!("Server successfully running on {:?}", addr);
+    tracing::info!("Server successfully running on {:?}", addr);
 
     tonic::transport::Server::builder()
         .add_service(grpc_server::GrpcServer::new(server))
