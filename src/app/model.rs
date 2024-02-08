@@ -118,10 +118,18 @@ impl Update<Msg> for Model {
                             network::Request::New(network::NewRequestEntity::Game)
                         }
                         crate::components::menu::Menus::CreateRoom => {
-                            network::Request::New(network::NewRequestEntity::Room)
+                            network::Request::New(network::NewRequestEntity::Room { room_id: None })
                         }
                         crate::components::menu::Menus::JoinRoom => todo!(),
                     };
+
+                    self.grpc_channel.send(network_request).unwrap();
+                    None
+                }
+                Msg::JoinRoom(room_id) => {
+                    let network_request = network::Request::New(network::NewRequestEntity::Room {
+                        room_id: Some(room_id),
+                    });
 
                     self.grpc_channel.send(network_request).unwrap();
                     None

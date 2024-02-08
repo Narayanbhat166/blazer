@@ -1,10 +1,10 @@
-use tui_realm_stdlib::{Input, Label, Paragraph, Radio};
+use tui_realm_stdlib::{Input, Paragraph, Radio};
 use tuirealm::{
     command::{Cmd, CmdResult},
     event::{Key, KeyEvent, KeyModifiers},
-    props::{BorderType, TextSpan},
+    props::{BorderType, Borders, TextSpan},
     tui::layout as tui_layout,
-    Component, Event, MockComponent,
+    Component, Event, MockComponent, StateValue,
 };
 
 use crate::{app::network::UserEvent, components::Msg};
@@ -27,6 +27,14 @@ impl Menus {
             _ => panic!("Unexpected value received when converting u8 to menus"),
         }
     }
+
+    fn get_helper_text(&self) -> &str {
+        match self {
+            Menus::NewGame => "Create a game with random players who are online",
+            Menus::CreateRoom => "Create a private room, invite your friends",
+            Menus::JoinRoom => "Join a private room",
+        }
+    }
 }
 
 impl ToString for Menus {
@@ -43,6 +51,7 @@ pub struct Menu {
     component: Radio,
     input_field: Input,
     helper_label: Paragraph,
+    is_input_field_active: bool,
 }
 
 impl MockComponent for Menu {
@@ -57,11 +66,10 @@ impl MockComponent for Menu {
 
         self.component.view(frame, chunks[0]);
 
-        let menu_option = Menus::from_u8(self.component.states.choice as u8);
-        if matches!(menu_option, Menus::CreateRoom | Menus::NewGame) {
-            self.helper_label.view(frame, chunks[1])
-        } else {
+        if self.is_input_field_active {
             self.input_field.view(frame, chunks[1])
+        } else {
+            self.helper_label.view(frame, chunks[1])
         }
     }
 
@@ -90,10 +98,17 @@ impl Menu {
             .collect::<Vec<_>>();
         let component = Radio::default()
             .choices(&choices)
-            .borders(tuirealm::props::Borders::default().modifiers(BorderType::Rounded))
+            .borders(
+                tuirealm::props::Borders::default()
+                    .modifiers(BorderType::Rounded)
+                    .color(tuirealm::props::Color::Green),
+            )
             .title("Menu", tuirealm::props::Alignment::Left);
 
-        let input_field = Input::default().title("Enter room id", tui_layout::Alignment::Left);
+        let input_field = Input::default()
+            .title("Enter room id", tui_layout::Alignment::Left)
+            .input_type(tuirealm::props::InputType::Number);
+
         let helper_label = Paragraph::default()
             .text(&[TextSpan::from(
                 "Create a game with random players who are online",
@@ -104,6 +119,7 @@ impl Menu {
             component,
             input_field,
             helper_label,
+            is_input_field_active: false,
         }
     }
 }
@@ -149,49 +165,43 @@ impl Component<Msg, UserEvent> for Menu {
             _ => Cmd::None,
         };
 
-        // If the present state is to join the room, then forward the command to input field
-        let menu_state = Menus::from_u8(self.component.states.choice as u8);
-        if matches!(menu_state, Menus::JoinRoom) {
+        // If the input field is active, then forward the command to input field
+        if self.is_input_field_active {
             let cmd_result = self.input_field.perform(cmd);
 
             match cmd_result {
                 CmdResult::Changed(_) => Some(Msg::StateUpdate),
+                CmdResult::Submit(submit_state) => {
+                    let input_state = submit_state.unwrap_one();
+                    if let StateValue::String(room_id) = input_state {
+                        Some(Msg::JoinRoom(room_id))
+                    } else {
+                        None
+                    }
+                }
                 _ => None,
             }
         } else {
             match self.perform(cmd) {
                 tuirealm::command::CmdResult::Changed(_) => {
                     let menu_state = Menus::from_u8(self.component.states.choice as u8);
-                    match menu_state {
-                        Menus::NewGame => {
-                            let helper_text = Paragraph::default()
-                                .text(&[TextSpan::from(
-                                    "Create a game with random players who are online",
-                                )])
-                                .borders(
-                                    tuirealm::props::Borders::default()
-                                        .modifiers(BorderType::Rounded),
-                                );
-                            self.helper_label = helper_text;
-                        }
-                        Menus::CreateRoom => {
-                            let helper_text = Paragraph::default()
-                                .text(&[TextSpan::from(
-                                    "Create a private room, invite your friends",
-                                )])
-                                .borders(
-                                    tuirealm::props::Borders::default()
-                                        .modifiers(BorderType::Rounded),
-                                );
-                            self.helper_label = helper_text;
-                        }
-                        Menus::JoinRoom => {}
-                    }
+                    let menu_text = menu_state.get_helper_text();
+                    let helper_text = Paragraph::default()
+                        .text(&[TextSpan::from(menu_text)])
+                        .borders(
+                            tuirealm::props::Borders::default().modifiers(BorderType::Rounded),
+                        );
+                    self.helper_label = helper_text;
                     Some(Msg::StateUpdate)
                 }
                 tuirealm::command::CmdResult::Submit(_) => {
                     let menu_state = Menus::from_u8(self.component.states.choice as u8);
-                    Some(Msg::SelectMenu(menu_state))
+                    if menu_state == Menus::JoinRoom {
+                        self.is_input_field_active = true;
+                        Some(Msg::StateUpdate)
+                    } else {
+                        Some(Msg::SelectMenu(menu_state))
+                    }
                 }
                 tuirealm::command::CmdResult::None => None,
                 _ => None,

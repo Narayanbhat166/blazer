@@ -20,7 +20,7 @@ pub enum UserEvent {
 }
 
 pub enum NewRequestEntity {
-    Room,
+    Room { room_id: Option<String> },
     Game,
 }
 
@@ -118,14 +118,14 @@ impl NetworkClient {
         while let Ok(message) = message_receiver.recv() {
             match message {
                 Request::New(request_type) => {
-                    let request_type = match request_type {
-                        NewRequestEntity::Room => 0,
-                        NewRequestEntity::Game => 1,
+                    let (request_type, room_id) = match request_type {
+                        NewRequestEntity::Room { room_id } => (0, room_id),
+                        NewRequestEntity::Game => (1, None),
                     };
 
                     let room_request = RoomServiceRequest {
                         client_id: self.client_id.clone().unwrap(),
-                        room_id: None,
+                        room_id,
                         request_type,
                     };
 

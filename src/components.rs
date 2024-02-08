@@ -10,6 +10,7 @@ pub enum Msg {
     StateUpdate,
     PingServer,
     SelectMenu(menu::Menus),
+    JoinRoom(String),
 }
 
 // Let's define the component ids for our application
