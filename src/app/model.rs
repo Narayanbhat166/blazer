@@ -16,6 +16,63 @@ use crate::{
 use super::network;
 use super::types::ClientConfig;
 
+#[derive(Debug, PartialEq)]
+pub struct UserDetails {
+    pub user_id: String,
+    pub user_name: Option<String>,
+    pub games_played: u32,
+    pub rank: u32,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct RoomState {
+    room_id: String,
+    room_users: Vec<UserDetails>,
+}
+
+#[derive(Default, Debug, PartialEq)]
+pub struct AppState {
+    user_id: Option<String>,
+    current_user: Option<UserDetails>,
+    room_details: Option<RoomState>,
+}
+
+pub enum AppStateUpdate {
+    UserIdUpdate {
+        user_id: String,
+    },
+    RoomUpdate {
+        room_id: String,
+        users: Vec<UserDetails>,
+    },
+    UserRoomJoin {
+        users: Vec<UserDetails>,
+    },
+}
+
+impl AppState {
+    fn apply_update(self, update: AppStateUpdate) -> Self {
+        match update {
+            AppStateUpdate::UserIdUpdate { user_id } => Self {
+                user_id: Some(user_id),
+                ..self
+            },
+            AppStateUpdate::RoomUpdate { room_id, users } => {
+                let room_state = RoomState {
+                    room_id,
+                    room_users: users,
+                };
+
+                Self {
+                    room_details: Some(room_state),
+                    ..self
+                }
+            }
+            AppStateUpdate::UserRoomJoin { users } => todo!(),
+        }
+    }
+}
+
 pub struct Model {
     /// Application
     pub app: Application<Id, Msg, UserEvent>,
@@ -26,6 +83,8 @@ pub struct Model {
     pub redraw: bool,
     /// Used to draw to terminal
     pub terminal: TerminalBridge,
+    /// State of the application
+    pub state: AppState,
 }
 
 impl Model {
@@ -44,6 +103,7 @@ impl Model {
             quit: false,
             redraw: true,
             terminal: TerminalBridge::new().expect("Cannot initialize terminal"),
+            state: AppState::default(),
         }
     }
 }
@@ -147,6 +207,10 @@ impl Update<Msg> for Model {
                             .unwrap();
                     }
 
+                    None
+                }
+                Msg::StateUpdate(new_state) => {
+                    self.state = new_state;
                     None
                 }
             }

@@ -46,6 +46,10 @@ pub enum Message {
         room_id: String,
         users: Vec<models::User>,
     },
+    UserJoined {
+        room_id: String,
+        users: Vec<models::User>,
+    },
 }
 
 pub struct MyGrpc {
@@ -237,15 +241,16 @@ impl grpc_server::Grpc for MyGrpc {
                     .await
                     .to_internal_api_error()?;
 
+                let user_ids = users_in_the_room;
+
+                let all_users_in_room = self
+                    .redis_client
+                    .get_multiple_users(user_ids.clone())
+                    .await
+                    .to_internal_api_error()?;
+
                 if room_size == room_max_capacity as usize {
                     // The game can be started, inform all the connected users of this room
-                    let user_ids = users_in_the_room;
-                    let all_users_in_room = self
-                        .redis_client
-                        .get_multiple_users(user_ids.clone())
-                        .await
-                        .to_internal_api_error()?;
-
                     for user_id in user_ids {
                         self.get_user_channel(user_id)
                             .await
@@ -257,9 +262,23 @@ impl grpc_server::Grpc for MyGrpc {
                             .unwrap();
                     }
                 } else {
+                    // The current user has joined this room
+                    // Inform all other users that this person has joined the room
+                    for user_id in user_ids {
+                        self.get_user_channel(user_id)
+                            .await
+                            .send(Message::UserJoined {
+                                room_id: room_id.clone(),
+                                users: all_users_in_room.clone(),
+                            })
+                            .await
+                            .unwrap();
+                    }
+
+                    // Send the message to current user
                     tx.send(Message::RoomCreated {
                         room_id: room_id,
-                        users: vec![user_from_db],
+                        users: all_users_in_room.clone(),
                     })
                     .await
                     .unwrap();
@@ -294,6 +313,14 @@ impl grpc_server::Grpc for MyGrpc {
                         Some(RoomServiceResponse {
                             room_id: Some(room_id),
                             message_type: 0,
+                            user_details: users.into_iter().map(Into::into).collect::<Vec<_>>(),
+                        }),
+                        false,
+                    ),
+                    Message::UserJoined { room_id, users } => (
+                        Some(RoomServiceResponse {
+                            room_id: Some(room_id),
+                            message_type: 1,
                             user_details: users.into_iter().map(Into::into).collect::<Vec<_>>(),
                         }),
                         false,

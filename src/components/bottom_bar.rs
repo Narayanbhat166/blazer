@@ -63,9 +63,6 @@ impl Component<Msg, UserEvent> for BottomBar {
     fn on(&mut self, event: tuirealm::Event<UserEvent>) -> Option<Msg> {
         match event {
             tuirealm::Event::User(user_event) => match user_event {
-                UserEvent::Pong => {
-                    self.set_text("Pong".to_string(), MessageType::Info);
-                }
                 UserEvent::InfoMessage(info_message) => {
                     self.set_text(info_message, MessageType::Success);
                 }

@@ -12,7 +12,6 @@ use super::{
 
 #[derive(PartialEq, Eq, Clone, PartialOrd)]
 pub enum UserEvent {
-    Pong,
     InfoMessage(String),
     NetworkError(String),
     RoomCreated {

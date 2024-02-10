@@ -1,3 +1,5 @@
+use crate::app::model::AppState;
+
 pub mod bottom_bar;
 pub mod help;
 pub mod menu;
@@ -10,6 +12,7 @@ pub enum Msg {
     AppClose,
     NetworkUpdate,
     Menu(menu::MenuMessage),
+    StateUpdate(AppState),
 }
 
 // Let's define the component ids for our application
