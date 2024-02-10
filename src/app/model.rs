@@ -5,7 +5,9 @@ use tuirealm::terminal::TerminalBridge;
 use tuirealm::tui::layout::{Constraint, Direction, Layout};
 use tuirealm::{Application, EventListenerCfg, Update};
 
-use crate::components::{menu::Menu, Id, Msg};
+use crate::components::menu::{self, MenuSelection};
+use crate::components::room_details::Details;
+use crate::components::{help, menu::Menu, Id, Msg};
 use crate::{
     app::network::{NetworkClient, UserEvent},
     components::bottom_bar::BottomBar,
@@ -64,7 +66,25 @@ impl Model {
                         .as_ref(),
                     )
                     .split(f.size());
-                self.app.view(&Id::Menu, f, chunks[0]);
+
+                let middle_chunk = chunks[1];
+                let middle_parts = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Percentage(75), Constraint::Percentage(25)])
+                    .split(middle_chunk);
+
+                let middle_half_split = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+                    .split(middle_parts[1]);
+
+                self.app
+                    .view(&Id::RoomDetails, f, *middle_half_split.first().unwrap());
+
+                self.app
+                    .view(&Id::Help, f, *middle_half_split.last().unwrap());
+
+                self.app.view(&Id::Menu, f, *chunks.first().unwrap());
                 self.app.view(&Id::BottomBar, f, *chunks.last().unwrap());
             })
             .is_ok());
@@ -92,6 +112,12 @@ impl Model {
         )
         .unwrap();
 
+        app.mount(Id::RoomDetails, Box::<Details>::default(), Vec::default())
+            .unwrap();
+
+        app.mount(Id::Help, Box::<help::Help>::default(), Vec::default())
+            .unwrap();
+
         // Active the menu
         assert!(app.active(&Id::Menu).is_ok());
         app
@@ -101,37 +127,26 @@ impl Model {
 impl Update<Msg> for Model {
     fn update(&mut self, msg: Option<Msg>) -> Option<Msg> {
         if let Some(msg) = msg {
-            // Set redraw
             self.redraw = true;
-            // Match message
             match msg {
                 Msg::AppClose => {
-                    self.quit = true; // Terminate
+                    self.quit = true;
                     None
                 }
-                Msg::Clock => None,
-                Msg::StateUpdate => None,
-                Msg::PingServer => None,
-                Msg::SelectMenu(menu_state) => {
-                    let network_request = match menu_state {
-                        crate::components::menu::Menus::NewGame => {
-                            network::Request::New(network::NewRequestEntity::Game)
+                Msg::NetworkUpdate => None,
+                Msg::Menu(menu_message) => {
+                    let network_request = match menu_message {
+                        menu::MenuMessage::MenuChange | menu::MenuMessage::MenuDataChange => None,
+                        menu::MenuMessage::MenuSelect(menu_selection) => {
+                            Some(network::NewRequestEntity::from(menu_selection))
                         }
-                        crate::components::menu::Menus::CreateRoom => {
-                            network::Request::New(network::NewRequestEntity::Room { room_id: None })
-                        }
-                        crate::components::menu::Menus::JoinRoom => todo!(),
                     };
+                    if let Some(network_request) = network_request {
+                        self.grpc_channel
+                            .send(network::Request::New(network_request))
+                            .unwrap();
+                    }
 
-                    self.grpc_channel.send(network_request).unwrap();
-                    None
-                }
-                Msg::JoinRoom(room_id) => {
-                    let network_request = network::Request::New(network::NewRequestEntity::Room {
-                        room_id: Some(room_id),
-                    });
-
-                    self.grpc_channel.send(network_request).unwrap();
                     None
                 }
             }

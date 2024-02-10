@@ -17,9 +17,22 @@ message RoomServiceRequest {
     RequestType request_type = 3;
 }
 
+message UserDetails {
+    string user_id = 1;
+    optional string user_name = 2;
+    uint32 games_played = 3;
+    uint32 rank = 4;
+}
+
 message RoomServiceResponse {
+    enum MessageType {
+        Init = 0;
+        UserJoined = 1;
+        GameStart = 2;
+    }
     optional string room_id = 1;
-    bool start_game = 2;
+    MessageType message_type = 2;
+    repeated UserDetails user_details = 3;
 }
 
 message PingRequest {

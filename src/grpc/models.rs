@@ -1,4 +1,4 @@
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize, Clone)]
 pub struct User {
     pub user_id: String,
     pub user_name: Option<String>,
@@ -7,7 +7,7 @@ pub struct User {
 }
 
 impl User {
-    pub fn new(user_id: String) -> Self {
+    pub fn new(user_id: String, user_name: String) -> Self {
         Self {
             user_id,
             user_name: None,

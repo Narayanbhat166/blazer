@@ -2,20 +2,47 @@ use tui_realm_stdlib::{Input, Paragraph, Radio};
 use tuirealm::{
     command::{Cmd, CmdResult},
     event::{Key, KeyEvent, KeyModifiers},
-    props::{BorderType, Borders, TextSpan},
+    props::{BorderType, Borders, Style, TextSpan},
     tui::layout as tui_layout,
     Component, Event, MockComponent, StateValue,
 };
 
-use crate::{app::network::UserEvent, components::Msg};
+use crate::{
+    app::network::{self, UserEvent},
+    components::Msg,
+};
 
 #[derive(Default, Debug, PartialEq, Eq)]
 #[repr(u8)]
-pub enum Menus {
+enum Menus {
     #[default]
     NewGame = 0,
     CreateRoom = 1,
     JoinRoom = 2,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum MenuSelection {
+    NewGame,
+    CreateRoom,
+    JoinRoom { room_id: String },
+}
+
+impl From<MenuSelection> for network::NewRequestEntity {
+    fn from(item_selection: MenuSelection) -> Self {
+        match item_selection {
+            MenuSelection::NewGame => network::NewRequestEntity::NewGame,
+            MenuSelection::CreateRoom => network::NewRequestEntity::CreateRoom,
+            MenuSelection::JoinRoom { room_id } => network::NewRequestEntity::JoinRoom { room_id },
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum MenuMessage {
+    MenuChange,
+    MenuDataChange,
+    MenuSelect(MenuSelection),
 }
 
 impl Menus {
@@ -67,7 +94,7 @@ impl MockComponent for Menu {
         self.component.view(frame, chunks[0]);
 
         if self.is_input_field_active {
-            self.input_field.view(frame, chunks[1])
+            self.input_field.view(frame, chunks[1]);
         } else {
             self.helper_label.view(frame, chunks[1])
         }
@@ -103,10 +130,15 @@ impl Menu {
                     .modifiers(BorderType::Rounded)
                     .color(tuirealm::props::Color::Green),
             )
-            .title("Menu", tuirealm::props::Alignment::Left);
+            .title("Menu - [ M ]", tuirealm::props::Alignment::Left);
 
         let input_field = Input::default()
             .title("Enter room id", tui_layout::Alignment::Left)
+            .borders(
+                tuirealm::props::Borders::default()
+                    .modifiers(BorderType::Rounded)
+                    .color(tuirealm::props::Color::Green),
+            )
             .input_type(tuirealm::props::InputType::Number);
 
         let helper_label = Paragraph::default()
@@ -170,11 +202,13 @@ impl Component<Msg, UserEvent> for Menu {
             let cmd_result = self.input_field.perform(cmd);
 
             match cmd_result {
-                CmdResult::Changed(_) => Some(Msg::StateUpdate),
+                CmdResult::Changed(_) => Some(Msg::Menu(MenuMessage::MenuDataChange)),
                 CmdResult::Submit(submit_state) => {
                     let input_state = submit_state.unwrap_one();
                     if let StateValue::String(room_id) = input_state {
-                        Some(Msg::JoinRoom(room_id))
+                        Some(Msg::Menu(MenuMessage::MenuSelect(
+                            MenuSelection::JoinRoom { room_id },
+                        )))
                     } else {
                         None
                     }
@@ -192,18 +226,26 @@ impl Component<Msg, UserEvent> for Menu {
                             tuirealm::props::Borders::default().modifiers(BorderType::Rounded),
                         );
                     self.helper_label = helper_text;
-                    Some(Msg::StateUpdate)
+                    Some(Msg::Menu(MenuMessage::MenuChange))
                 }
                 tuirealm::command::CmdResult::Submit(_) => {
                     let menu_state = Menus::from_u8(self.component.states.choice as u8);
-                    if menu_state == Menus::JoinRoom {
-                        self.is_input_field_active = true;
-                        Some(Msg::StateUpdate)
-                    } else {
-                        Some(Msg::SelectMenu(menu_state))
-                    }
+
+                    let menu_update = match menu_state {
+                        Menus::NewGame => MenuMessage::MenuSelect(MenuSelection::NewGame),
+                        Menus::CreateRoom => MenuMessage::MenuSelect(MenuSelection::CreateRoom),
+                        Menus::JoinRoom => {
+                            self.is_input_field_active = true;
+                            self.input_field
+                                .attr(tuirealm::Attribute::Focus, tuirealm::AttrValue::Flag(true));
+
+                            self.component
+                                .attr(tuirealm::Attribute::Focus, tuirealm::AttrValue::Flag(false));
+                            MenuMessage::MenuChange
+                        }
+                    };
+                    Some(Msg::Menu(menu_update))
                 }
-                tuirealm::command::CmdResult::None => None,
                 _ => None,
             }
         }

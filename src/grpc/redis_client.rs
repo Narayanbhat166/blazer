@@ -1,4 +1,4 @@
-use fred::interfaces::KeysInterface;
+use fred::{interfaces::KeysInterface, types::MultipleKeys};
 
 use crate::{app::errors, grpc::models};
 
@@ -69,6 +69,31 @@ impl RedisClient {
         }
     }
 
+    async fn get_multiple_keys<
+        K: Into<MultipleKeys> + Send,
+        V: serde::Serialize + serde::de::DeserializeOwned,
+    >(
+        &self,
+        keys: K,
+    ) -> DbResult<Vec<V>> {
+        let get_command_result = self.client.mget::<Vec<String>, _>(keys).await;
+
+        match get_command_result {
+            Ok(value_string_optional) => {
+                let result = value_string_optional
+                    .iter()
+                    .map(|value_string| serde_json::from_str::<V>(&value_string))
+                    .collect::<Result<Vec<_>, _>>();
+
+                result.map_err(|serialize_error| {
+                    tracing::error!(?serialize_error);
+                    errors::DbError::ParsingFailure
+                })
+            }
+            Err(error) => Err(errors::DbError::Others(error)),
+        }
+    }
+
     pub async fn get_user_optional(&self, user_id: String) -> DbResult<Option<models::User>> {
         let res = self.get_and_deserialize::<_, models::User>(user_id).await;
         match res {
@@ -119,5 +144,9 @@ impl RedisClient {
 
     pub async fn get_room(&self, room_id: String) -> DbResult<models::Room> {
         self.get_and_deserialize::<_, models::Room>(room_id).await
+    }
+
+    pub async fn get_multiple_users(&self, user_ids: Vec<String>) -> DbResult<Vec<models::User>> {
+        self.get_multiple_keys(user_ids).await
     }
 }

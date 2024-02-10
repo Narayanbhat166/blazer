@@ -10,18 +10,30 @@ use super::{
     utils,
 };
 
-#[derive(PartialEq, Eq, PartialOrd, Clone)]
+#[derive(PartialEq, Eq, Clone, PartialOrd)]
 pub enum UserEvent {
     Pong,
     InfoMessage(String),
     NetworkError(String),
-    RoomCreated { room_id: Option<String> },
+    RoomCreated {
+        room_id: Option<String>,
+        users: Vec<UserDetails>,
+    },
     GameStart,
 }
 
+#[derive(PartialEq, Eq, PartialOrd, Clone)]
+pub struct UserDetails {
+    pub user_id: String,
+    pub user_name: Option<String>,
+    pub games_played: u32,
+    pub rank: u32,
+}
+
 pub enum NewRequestEntity {
-    Room { room_id: Option<String> },
-    Game,
+    JoinRoom { room_id: String },
+    CreateRoom,
+    NewGame,
 }
 
 pub enum Request {
@@ -62,6 +74,24 @@ impl Default for NetworkClient {
         Self {
             messsages: Arc::new(Mutex::new(vec![])),
             client_id: None,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum RoomMessageType {
+    Init,
+    UserJoined,
+    GameStart,
+}
+
+impl RoomMessageType {
+    pub fn from_u8(message_type_in_u8: u8) -> Self {
+        match message_type_in_u8 {
+            0 => Self::Init,
+            1 => Self::UserJoined,
+            2 => Self::GameStart,
+            _ => panic!("Unexpected value received for message type"),
         }
     }
 }
@@ -119,8 +149,9 @@ impl NetworkClient {
             match message {
                 Request::New(request_type) => {
                     let (request_type, room_id) = match request_type {
-                        NewRequestEntity::Room { room_id } => (0, room_id),
-                        NewRequestEntity::Game => (1, None),
+                        NewRequestEntity::JoinRoom { room_id } => (1, Some(room_id)),
+                        NewRequestEntity::NewGame => (1, None),
+                        NewRequestEntity::CreateRoom => (0, None),
                     };
 
                     let room_request = RoomServiceRequest {
@@ -140,7 +171,9 @@ impl NetworkClient {
 
                                 match inner_message {
                                     Ok(message) => {
-                                        if message.start_game {
+                                        let message_type =
+                                            RoomMessageType::from_u8(message.message_type as u8);
+                                        if message_type == RoomMessageType::GameStart {
                                             cloned_self.push_user_event(UserEvent::GameStart);
                                             // Break the loop and disconnect the client as this stream is no longer needed
                                             break;
@@ -148,6 +181,11 @@ impl NetworkClient {
                                             // Since the game has not yet begun, wait for next message and do not break the loop
                                             cloned_self.push_user_event(UserEvent::RoomCreated {
                                                 room_id: message.room_id,
+                                                users: message
+                                                    .user_details
+                                                    .into_iter()
+                                                    .map(Into::into)
+                                                    .collect::<Vec<_>>(),
                                             })
                                         }
                                     }

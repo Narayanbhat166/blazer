@@ -5,6 +5,7 @@ use std::{
 
 pub use blazer_grpc::{
     grpc_client, grpc_server, PingRequest, PingResponse, RoomServiceRequest, RoomServiceResponse,
+    UserDetails,
 };
 
 use rand::Rng;
@@ -21,9 +22,30 @@ mod blazer_grpc {
     tonic::include_proto!("server");
 }
 
+impl From<models::User> for UserDetails {
+    fn from(db_model: models::User) -> Self {
+        Self {
+            user_id: db_model.user_id,
+            user_name: db_model.user_name,
+            games_played: db_model.games_played as u32,
+            rank: db_model.player_rank as u32,
+        }
+    }
+}
+
 pub enum Message {
-    RoomCreated { room_id: Option<String> },
-    GameStart(String),
+    RoomCreated {
+        room_id: String,
+        users: Vec<models::User>,
+    },
+    RoomJoined {
+        room_id: String,
+        users: Vec<models::User>,
+    },
+    GameStart {
+        room_id: String,
+        users: Vec<models::User>,
+    },
 }
 
 pub struct MyGrpc {
@@ -33,6 +55,16 @@ pub struct MyGrpc {
 
 const COMMON_ROOM: &str = "COMMON_ROOM_KEY";
 const COMMON_ROOM_SIZE: u8 = 2;
+
+pub fn generate_name() -> String {
+    let random_name_generator = rnglib::RNG::from(&rnglib::Language::Fantasy);
+
+    format!(
+        "{} {}",
+        random_name_generator.generate_name(),
+        random_name_generator.generate_name()
+    )
+}
 
 impl MyGrpc {
     pub async fn new(redis_client: RedisClient) -> Self {
@@ -104,7 +136,9 @@ impl grpc_server::Grpc for MyGrpc {
             None => {
                 // Create new user
                 let user_uuid = uuid::Uuid::new_v4().as_simple().to_string();
-                let new_user = models::User::new(user_uuid.clone());
+                let new_user_name = generate_name();
+                let new_user = models::User::new(user_uuid.clone(), new_user_name);
+
                 let db_user = self
                     .redis_client
                     .insert_user(new_user)
@@ -134,8 +168,17 @@ impl grpc_server::Grpc for MyGrpc {
         let (response_sender, response_receiver) = mpsc::channel(128);
         let (tx, mut rx) = mpsc::channel::<Message>(10);
 
+        // Insert the user into channel so that async communication can take place
         self.insert_user_channel(user_id.clone(), tx.clone());
-        tracing::error!(request_type);
+
+        // Authenticate user
+        let user_from_db = self
+            .redis_client
+            .get_user(user_id.clone())
+            .await
+            .to_not_found(errors::ApiError::UserNotFound {
+                user_id: user_id.clone(),
+            })?;
 
         match request_type {
             0 => {
@@ -158,7 +201,8 @@ impl grpc_server::Grpc for MyGrpc {
                                 .to_internal_api_error()?;
 
                             tx.send(Message::RoomCreated {
-                                room_id: Some(db_room.room_id),
+                                room_id: db_room.room_id,
+                                users: vec![user_from_db.clone()],
                             })
                             .await
                             .unwrap();
@@ -196,17 +240,29 @@ impl grpc_server::Grpc for MyGrpc {
                 if room_size == room_max_capacity as usize {
                     // The game can be started, inform all the connected users of this room
                     let user_ids = users_in_the_room;
+                    let all_users_in_room = self
+                        .redis_client
+                        .get_multiple_users(user_ids.clone())
+                        .await
+                        .to_internal_api_error()?;
+
                     for user_id in user_ids {
                         self.get_user_channel(user_id)
                             .await
-                            .send(Message::GameStart(room_id.clone()))
+                            .send(Message::GameStart {
+                                room_id: room_id.clone(),
+                                users: all_users_in_room.clone(),
+                            })
                             .await
                             .unwrap();
                     }
                 } else {
-                    tx.send(Message::RoomCreated { room_id: None })
-                        .await
-                        .unwrap();
+                    tx.send(Message::RoomCreated {
+                        room_id: room_id,
+                        users: vec![user_from_db],
+                    })
+                    .await
+                    .unwrap();
                 }
             }
             _ => {
@@ -218,23 +274,34 @@ impl grpc_server::Grpc for MyGrpc {
         tokio::spawn(async move {
             while let Some(item) = rx.recv().await {
                 let (response, should_close_stream) = match item {
-                    Message::GameStart(room_id) => (
+                    Message::GameStart { room_id, users } => (
                         Some(RoomServiceResponse {
                             room_id: Some(room_id),
-                            start_game: true,
+                            message_type: 2,
+                            user_details: users.into_iter().map(Into::into).collect::<Vec<_>>(),
                         }),
                         true,
                     ),
-                    Message::RoomCreated { room_id } => (
+                    Message::RoomCreated { room_id, users } => (
                         Some(RoomServiceResponse {
-                            room_id: room_id,
-                            start_game: false,
+                            room_id: Some(room_id),
+                            message_type: 0,
+                            user_details: users.into_iter().map(Into::into).collect::<Vec<_>>(),
+                        }),
+                        false,
+                    ),
+                    Message::RoomJoined { room_id, users } => (
+                        Some(RoomServiceResponse {
+                            room_id: Some(room_id),
+                            message_type: 0,
+                            user_details: users.into_iter().map(Into::into).collect::<Vec<_>>(),
                         }),
                         false,
                     ),
                 };
 
                 if let Some(response) = response {
+                    tracing::info!(message=?response, to=?user_id);
                     match response_sender
                         .send(Result::<_, tonic::Status>::Ok(response))
                         .await

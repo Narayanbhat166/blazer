@@ -1,16 +1,15 @@
 pub mod bottom_bar;
-// pub mod counter;
+pub mod help;
 pub mod menu;
+pub mod network_receptor;
+pub mod room_details;
 
 // Let's define the messages handled by our app. NOTE: it must derive `PartialEq`
 #[derive(Debug, PartialEq)]
 pub enum Msg {
     AppClose,
-    Clock,
-    StateUpdate,
-    PingServer,
-    SelectMenu(menu::Menus),
-    JoinRoom(String),
+    NetworkUpdate,
+    Menu(menu::MenuMessage),
 }
 
 // Let's define the component ids for our application
@@ -18,4 +17,7 @@ pub enum Msg {
 pub enum Id {
     Menu,
     BottomBar,
+    RoomDetails,
+    NetworkReceptor,
+    Help,
 }

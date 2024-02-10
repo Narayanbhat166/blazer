@@ -65,34 +65,24 @@ impl Component<Msg, UserEvent> for BottomBar {
             tuirealm::Event::User(user_event) => match user_event {
                 UserEvent::Pong => {
                     self.set_text("Pong".to_string(), MessageType::Info);
-                    None
                 }
                 UserEvent::InfoMessage(info_message) => {
                     self.set_text(info_message, MessageType::Success);
-                    Some(Msg::StateUpdate)
                 }
                 UserEvent::NetworkError(network_error) => {
                     self.set_text(network_error, MessageType::Error);
-                    Some(Msg::StateUpdate)
                 }
-                UserEvent::RoomCreated { room_id } => {
-                    let text_message = if let Some(room_id) = room_id {
-                        format!("The luxury double bedroom with room number {room_id} has been created , Waiting for your partner")
-                    } else {
-                        "The luxury double bedroom has been created, Waiting for your partner"
-                            .to_string()
-                    };
+                UserEvent::RoomCreated { .. } => {
+                    let text_message = "Waiting for other players to join".to_string();
 
                     self.set_text(text_message, MessageType::Success);
-
-                    Some(Msg::StateUpdate)
                 }
                 UserEvent::GameStart => {
                     self.set_text("Game will start now".to_string(), MessageType::Info);
-                    Some(Msg::StateUpdate)
                 }
             },
-            _ => None,
-        }
+            _ => {}
+        };
+        Some(Msg::NetworkUpdate)
     }
 }
