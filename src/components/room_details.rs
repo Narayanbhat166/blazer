@@ -1,19 +1,22 @@
 use tui_realm_stdlib::{Container, Label, List, Table};
 use tuirealm::{
+    command::Cmd,
     props::{BorderType, Borders, Layout, Style, TextSpan},
     tui::layout::Constraint,
     Component, MockComponent,
 };
 
-use crate::app::network::UserEvent;
+use crate::app::{model, network::UserEvent};
 
 use super::Msg;
 
 #[derive(Default)]
 pub struct OwnStates {
-    pub users: Vec<UserDetails>,
+    pub users: Vec<model::UserDetails>,
     pub global_details: GlobalDetails,
     pub room_details: RoomDetails,
+    pub is_in_waiting_room: bool,
+    pub is_in_game: bool,
 }
 
 #[derive(Default)]
@@ -22,16 +25,36 @@ pub struct RoomDetails {
 }
 
 /// Based on the screen that is currently active, show relevant information
-#[derive(MockComponent)]
 pub struct Details {
     component: tui_realm_stdlib::Container,
     state: OwnStates,
 }
 
-pub struct UserDetails {
-    user_name: String,
-    games_played: Option<u16>,
-    rank: Option<u16>,
+impl MockComponent for Details {
+    fn view(&mut self, frame: &mut tuirealm::Frame, area: tuirealm::tui::prelude::Rect) {
+        if self.state.is_in_waiting_room {
+            let users_list = get_users_list(self.state.users.clone());
+            self.component.children[1] = Box::new(users_list);
+        }
+
+        self.component.view(frame, area);
+    }
+
+    fn query(&self, attr: tuirealm::Attribute) -> Option<tuirealm::AttrValue> {
+        self.component.query(attr)
+    }
+
+    fn attr(&mut self, attr: tuirealm::Attribute, value: tuirealm::AttrValue) {
+        self.component.attr(attr, value)
+    }
+
+    fn state(&self) -> tuirealm::State {
+        self.component.state()
+    }
+
+    fn perform(&mut self, cmd: Cmd) -> tuirealm::command::CmdResult {
+        self.component.perform(cmd)
+    }
 }
 
 pub struct GlobalDetails {
@@ -48,30 +71,40 @@ impl Default for GlobalDetails {
     }
 }
 
-fn get_users_list(user_details: Vec<UserDetails>) -> List {
+fn get_users_list(user_details: Vec<model::UserDetails>) -> List {
     let user_details = user_details
         .iter()
-        .map(|user_details| TextSpan::new(user_details.user_name.clone()))
+        .map(|user_details| {
+            vec![TextSpan::new(
+                user_details
+                    .user_name
+                    .clone()
+                    .unwrap_or("Anonymous".to_string()),
+            )]
+        })
         .collect::<Vec<_>>();
 
     List::default()
         .title("Users in the room", tuirealm::props::Alignment::Left)
-        .rows(vec![user_details])
+        .rows(user_details)
         .borders(tuirealm::props::Borders::default().modifiers(BorderType::Rounded))
+        .rewind(true)
+        .scroll(true)
+        .highlighted_color(tuirealm::props::Color::Gray)
 }
 
-fn get_user_information_table(user: UserDetails) -> Table {
+fn get_user_information_table(user: model::UserDetails) -> Table {
     // Display all the keys on col 1
     // Display all the values on col 2
-    let first_row = vec![TextSpan::new("User Name"), TextSpan::new(user.user_name)];
+    let first_row = vec![
+        TextSpan::new("User Name"),
+        TextSpan::new(user.user_name.unwrap_or("Anonymous".to_string())),
+    ];
     let second_row = vec![
         TextSpan::new("Games Played"),
-        TextSpan::new(user.games_played.unwrap_or_default().to_string()),
+        TextSpan::new(user.games_played.to_string()),
     ];
-    let thrid_row = vec![
-        TextSpan::new("Rank"),
-        TextSpan::new(user.rank.unwrap_or_default().to_string()),
-    ];
+    let thrid_row = vec![TextSpan::new("Rank"), TextSpan::new(user.rank.to_string())];
     let row_information = vec![first_row, second_row, thrid_row];
 
     Table::default()
@@ -103,7 +136,8 @@ impl Default for Details {
     fn default() -> Self {
         let users_list = List::default()
             .title("Users in the room", tuirealm::props::Alignment::Left)
-            .borders(tuirealm::props::Borders::default().modifiers(BorderType::Rounded));
+            .borders(tuirealm::props::Borders::default().modifiers(BorderType::Rounded))
+            .rows(vec![vec![TextSpan::new("Please join a room")]]);
 
         let users_information =
             Table::default().title("User Information", tuirealm::props::Alignment::Left);
@@ -115,14 +149,14 @@ impl Default for Details {
             .layout(
                 Layout::default()
                     .constraints(&[
-                        Constraint::Percentage(50),
-                        Constraint::Percentage(30),
                         Constraint::Percentage(20),
+                        Constraint::Percentage(20),
+                        Constraint::Percentage(60),
                     ])
                     .margin(1)
                     .direction(tuirealm::tui::layout::Direction::Horizontal),
             )
-            .children(vec![Box::new(global_stats)]);
+            .children(vec![Box::new(global_stats), Box::new(users_list)]);
 
         Self {
             component: container,
@@ -133,11 +167,21 @@ impl Default for Details {
 
 impl Component<Msg, UserEvent> for Details {
     fn on(&mut self, event: tuirealm::Event<UserEvent>) -> Option<Msg> {
-        // match event {
-        //     // UserEvent::RoomCreated { room_id } => {
-        //     //     let
-        //     // }
-        // }
-        Some(Msg::NetworkUpdate)
+        match event {
+            tuirealm::Event::User(user_event) => match user_event {
+                UserEvent::RoomCreated { room_id, users } => {
+                    self.state.users = users
+                        .into_iter()
+                        .map(|user_details| model::UserDetails::from(user_details))
+                        .collect::<Vec<_>>();
+
+                    self.state.is_in_waiting_room = true;
+                    None
+                }
+                UserEvent::UserJoined { users } => todo!(),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 }

@@ -16,7 +16,7 @@ use crate::{
 use super::network;
 use super::types::ClientConfig;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct UserDetails {
     pub user_id: String,
     pub user_name: Option<String>,
@@ -24,19 +24,28 @@ pub struct UserDetails {
     pub rank: u32,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct RoomState {
     room_id: String,
     room_users: Vec<UserDetails>,
 }
 
-#[derive(Default, Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
+pub struct GameState {
+    room_id: String,
+    game_id: String,
+    has_started: bool,
+}
+
+#[derive(Default, Debug, PartialEq, Clone)]
 pub struct AppState {
     user_id: Option<String>,
     current_user: Option<UserDetails>,
     room_details: Option<RoomState>,
+    game_details: Option<GameState>,
 }
 
+#[derive(Debug, PartialEq)]
 pub enum AppStateUpdate {
     UserIdUpdate {
         user_id: String,
@@ -48,6 +57,7 @@ pub enum AppStateUpdate {
     UserRoomJoin {
         users: Vec<UserDetails>,
     },
+    GameStart,
 }
 
 impl AppState {
@@ -68,7 +78,33 @@ impl AppState {
                     ..self
                 }
             }
-            AppStateUpdate::UserRoomJoin { users } => todo!(),
+            AppStateUpdate::UserRoomJoin { users } => {
+                let previous_room_state = self.room_details.expect(
+                    "Message ordering is invalid. Expected room details before user room join",
+                );
+
+                let new_room_state = RoomState {
+                    room_users: users,
+                    ..previous_room_state
+                };
+
+                Self {
+                    room_details: Some(new_room_state),
+                    ..self
+                }
+            }
+            AppStateUpdate::GameStart => {
+                let game_data = GameState {
+                    room_id: todo!(),
+                    game_id: todo!(),
+                    has_started: todo!(),
+                };
+
+                Self {
+                    game_details: Some(game_data),
+                    ..self
+                }
+            }
         }
     }
 }
@@ -172,8 +208,15 @@ impl Model {
         )
         .unwrap();
 
-        app.mount(Id::RoomDetails, Box::<Details>::default(), Vec::default())
-            .unwrap();
+        app.mount(
+            Id::RoomDetails,
+            Box::<Details>::default(),
+            vec![tuirealm::Sub::new(
+                tuirealm::SubEventClause::Any,
+                tuirealm::SubClause::Always,
+            )],
+        )
+        .unwrap();
 
         app.mount(Id::Help, Box::<help::Help>::default(), Vec::default())
             .unwrap();
@@ -193,7 +236,7 @@ impl Update<Msg> for Model {
                     self.quit = true;
                     None
                 }
-                Msg::NetworkUpdate => None,
+                Msg::NetworkUpdate | Msg::ReDraw => None,
                 Msg::Menu(menu_message) => {
                     let network_request = match menu_message {
                         menu::MenuMessage::MenuChange | menu::MenuMessage::MenuDataChange => None,
@@ -209,7 +252,8 @@ impl Update<Msg> for Model {
 
                     None
                 }
-                Msg::StateUpdate(new_state) => {
+                Msg::StateUpdate(state_update) => {
+                    let new_state = self.state.clone().apply_update(state_update);
                     self.state = new_state;
                     None
                 }

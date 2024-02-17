@@ -15,7 +15,10 @@ pub enum UserEvent {
     InfoMessage(String),
     NetworkError(String),
     RoomCreated {
-        room_id: Option<String>,
+        room_id: String,
+        users: Vec<UserDetails>,
+    },
+    UserJoined {
         users: Vec<UserDetails>,
     },
     GameStart,
@@ -172,20 +175,39 @@ impl NetworkClient {
                                     Ok(message) => {
                                         let message_type =
                                             RoomMessageType::from_u8(message.message_type as u8);
-                                        if message_type == RoomMessageType::GameStart {
-                                            cloned_self.push_user_event(UserEvent::GameStart);
-                                            // Break the loop and disconnect the client as this stream is no longer needed
-                                            break;
-                                        } else {
-                                            // Since the game has not yet begun, wait for next message and do not break the loop
-                                            cloned_self.push_user_event(UserEvent::RoomCreated {
-                                                room_id: message.room_id,
-                                                users: message
+
+                                        match message_type {
+                                            RoomMessageType::Init => {
+                                                let room_id = message
+                                                    .room_id
+                                                    .expect("Required room id, but did not find in init message");
+
+                                                let users = message
                                                     .user_details
                                                     .into_iter()
                                                     .map(Into::into)
-                                                    .collect::<Vec<_>>(),
-                                            })
+                                                    .collect::<Vec<_>>();
+
+                                                let room_created_event =
+                                                    UserEvent::RoomCreated { room_id, users };
+
+                                                cloned_self.push_user_event(room_created_event)
+                                            }
+                                            RoomMessageType::UserJoined => {
+                                                let users = message
+                                                    .user_details
+                                                    .into_iter()
+                                                    .map(Into::into)
+                                                    .collect::<Vec<_>>();
+
+                                                let user_joined_event =
+                                                    UserEvent::UserJoined { users };
+
+                                                cloned_self.push_user_event(user_joined_event);
+                                            }
+                                            RoomMessageType::GameStart => {
+                                                cloned_self.push_user_event(UserEvent::GameStart)
+                                            }
                                         }
                                     }
                                     Err(error) => {

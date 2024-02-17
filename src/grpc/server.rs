@@ -167,21 +167,21 @@ impl grpc_server::Grpc for MyGrpc {
         let request = request.into_inner();
 
         let request_type = request.request_type;
-        let user_id = request.client_id;
+        let current_user_id = request.client_id;
 
         let (response_sender, response_receiver) = mpsc::channel(128);
         let (tx, mut rx) = mpsc::channel::<Message>(10);
 
         // Insert the user into channel so that async communication can take place
-        self.insert_user_channel(user_id.clone(), tx.clone());
+        self.insert_user_channel(current_user_id.clone(), tx.clone());
 
         // Authenticate user
         let user_from_db = self
             .redis_client
-            .get_user(user_id.clone())
+            .get_user(current_user_id.clone())
             .await
             .to_not_found(errors::ApiError::UserNotFound {
-                user_id: user_id.clone(),
+                user_id: current_user_id.clone(),
             })?;
 
         match request_type {
@@ -231,8 +231,10 @@ impl grpc_server::Grpc for MyGrpc {
                     })?;
 
                 // Add the current user to the room
-                let room_size = room.add_user(user_id.clone());
+                let room_size = room.add_user(current_user_id.clone());
                 let room_max_capacity = room.room_size;
+
+                // Get details about all users in the room, send them update
                 let users_in_the_room = room.users.clone();
 
                 // Update the room in database
@@ -241,17 +243,15 @@ impl grpc_server::Grpc for MyGrpc {
                     .await
                     .to_internal_api_error()?;
 
-                let user_ids = users_in_the_room;
-
                 let all_users_in_room = self
                     .redis_client
-                    .get_multiple_users(user_ids.clone())
+                    .get_multiple_users(users_in_the_room.clone())
                     .await
                     .to_internal_api_error()?;
 
                 if room_size == room_max_capacity as usize {
                     // The game can be started, inform all the connected users of this room
-                    for user_id in user_ids {
+                    for user_id in users_in_the_room {
                         self.get_user_channel(user_id)
                             .await
                             .send(Message::GameStart {
@@ -263,8 +263,14 @@ impl grpc_server::Grpc for MyGrpc {
                     }
                 } else {
                     // The current user has joined this room
-                    // Inform all other users that this person has joined the room
-                    for user_id in user_ids {
+                    // Inform all other users, except current user, that this person has joined the room
+
+                    let users_in_room_except_self = users_in_the_room
+                        .into_iter()
+                        .filter(|user_id| user_id != &current_user_id)
+                        .collect::<Vec<_>>();
+
+                    for user_id in users_in_room_except_self {
                         self.get_user_channel(user_id)
                             .await
                             .send(Message::UserJoined {
@@ -328,7 +334,7 @@ impl grpc_server::Grpc for MyGrpc {
                 };
 
                 if let Some(response) = response {
-                    tracing::info!(message=?response, to=?user_id);
+                    tracing::info!(message=?response, to=?current_user_id);
                     match response_sender
                         .send(Result::<_, tonic::Status>::Ok(response))
                         .await

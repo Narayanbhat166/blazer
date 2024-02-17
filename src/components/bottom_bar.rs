@@ -69,13 +69,21 @@ impl Component<Msg, UserEvent> for BottomBar {
                 UserEvent::NetworkError(network_error) => {
                     self.set_text(network_error, MessageType::Error);
                 }
-                UserEvent::RoomCreated { .. } => {
-                    let text_message = "Waiting for other players to join".to_string();
+                UserEvent::RoomCreated { room_id, .. } => {
+                    let text_message =
+                        format!("Joined room with id {room_id}. Waiting for other players to join");
 
                     self.set_text(text_message, MessageType::Success);
                 }
                 UserEvent::GameStart => {
                     self.set_text("Game will start now".to_string(), MessageType::Info);
+                }
+                UserEvent::UserJoined { users } => {
+                    let text = format!(
+                        "New user has joined the party, the number of users are {}",
+                        users.len()
+                    );
+                    self.set_text(text, MessageType::Info)
                 }
             },
             _ => {}
