@@ -2,14 +2,16 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use tuirealm::terminal::TerminalBridge;
-use tuirealm::tui::layout::{Constraint, Direction, Layout};
 use tuirealm::{Application, EventListenerCfg, Update};
 
-use crate::components::menu::{self, MenuSelection};
+use crate::components::menu::{self};
 use crate::components::room_details::Details;
 use crate::components::{help, menu::Menu, Id, Msg};
 use crate::{
-    app::network::{NetworkClient, UserEvent},
+    app::{
+        layout,
+        network::{NetworkClient, UserEvent},
+    },
     components::bottom_bar::BottomBar,
 };
 
@@ -146,44 +148,19 @@ impl Model {
 
 impl Model {
     pub fn view(&mut self) {
-        assert!(self
-            .terminal
+        self.terminal
             .raw_mut()
             .draw(|f| {
-                let chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .margin(1)
-                    .constraints(
-                        [
-                            Constraint::Length(3), // Menu
-                            Constraint::Min(10),   // Action area
-                            Constraint::Length(3), // Bottom bar
-                        ]
-                        .as_ref(),
-                    )
-                    .split(f.size());
+                let custom_layout = layout::CustomLayout::new(f.size());
 
-                let middle_chunk = chunks[1];
-                let middle_parts = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Percentage(75), Constraint::Percentage(25)])
-                    .split(middle_chunk);
+                self.app.view(&Id::RoomDetails, f, custom_layout.details);
 
-                let middle_half_split = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-                    .split(middle_parts[1]);
+                self.app.view(&Id::Help, f, custom_layout.navigation);
 
-                self.app
-                    .view(&Id::RoomDetails, f, *middle_half_split.first().unwrap());
-
-                self.app
-                    .view(&Id::Help, f, *middle_half_split.last().unwrap());
-
-                self.app.view(&Id::Menu, f, *chunks.first().unwrap());
-                self.app.view(&Id::BottomBar, f, *chunks.last().unwrap());
+                self.app.view(&Id::Menu, f, custom_layout.menu);
+                self.app.view(&Id::BottomBar, f, custom_layout.bottom_bar);
             })
-            .is_ok());
+            .unwrap();
     }
 
     fn init_app(network_client: NetworkClient) -> Application<Id, Msg, UserEvent> {

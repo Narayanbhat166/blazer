@@ -1,9 +1,5 @@
-use tui_realm_stdlib::{Container, Label, List, Phantom, Table};
-use tuirealm::{
-    props::{BorderType, Borders, Layout, Style, TextSpan},
-    tui::layout::Constraint,
-    Component, MockComponent,
-};
+use tui_realm_stdlib::Table;
+use tuirealm::{props::TextSpan, Component, MockComponent};
 
 use crate::app::network::UserEvent;
 
@@ -30,6 +26,7 @@ impl Default for Help {
 
 impl Component<Msg, UserEvent> for Help {
     fn on(&mut self, event: tuirealm::Event<UserEvent>) -> Option<Msg> {
+        // Change navigation information based on the user action
         None
     }
 }
