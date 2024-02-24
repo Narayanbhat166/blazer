@@ -19,7 +19,7 @@ message RoomServiceRequest {
 
 message UserDetails {
     string user_id = 1;
-    optional string user_name = 2;
+    string user_name = 2;
     uint32 games_played = 3;
     uint32 rank = 4;
 }
@@ -36,10 +36,10 @@ message RoomServiceResponse {
 }
 
 message PingRequest {
-    optional string client_id = 1;
+    optional string user_id = 1;
 }
 
 message PingResponse {
-    string client_id = 1;
-    optional string client_name = 2;
+    string user_id = 1;
+    string user_name = 2;
 }

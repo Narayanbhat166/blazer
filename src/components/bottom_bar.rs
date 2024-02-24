@@ -61,8 +61,8 @@ impl BottomBar {
 
 impl Component<Msg, UserEvent> for BottomBar {
     fn on(&mut self, event: tuirealm::Event<UserEvent>) -> Option<Msg> {
-        match event {
-            tuirealm::Event::User(user_event) => match user_event {
+        if let tuirealm::Event::User(user_event) = event {
+            match user_event {
                 UserEvent::InfoMessage(info_message) => {
                     self.set_text(info_message, MessageType::Success);
                 }
@@ -85,8 +85,7 @@ impl Component<Msg, UserEvent> for BottomBar {
                     );
                     self.set_text(text, MessageType::Info)
                 }
-            },
-            _ => {}
+            }
         };
         Some(Msg::NetworkUpdate)
     }

@@ -6,17 +6,9 @@ use crate::app::{model::AppStateUpdate, network::UserEvent};
 use super::Msg;
 
 /// This component acts upon the state updates because of network events
-#[derive(MockComponent)]
+#[derive(MockComponent, Default)]
 pub struct NetworkReceptor {
     component: Phantom,
-}
-
-impl Default for NetworkReceptor {
-    fn default() -> Self {
-        Self {
-            component: Phantom::default(),
-        }
-    }
 }
 
 impl Component<Msg, UserEvent> for NetworkReceptor {

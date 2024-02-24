@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 
 use crate::{
     app::errors::{self, ApiError, ResultExtApp},
-    grpc::{models, redis_client::RedisClient},
+    grpc::{redis_client::RedisClient, storage::models},
 };
 
 mod blazer_grpc {
@@ -109,6 +109,21 @@ type CreateRoomStream = std::pin::Pin<
     Box<dyn tokio_stream::Stream<Item = Result<RoomServiceResponse, tonic::Status>> + Send>,
 >;
 
+enum RoomServiceRequestType {
+    CreateRoom = 0,
+    JoinRoom = 1,
+}
+
+impl RoomServiceRequestType {
+    pub fn from_u8(request_type: u8) -> Option<Self> {
+        match request_type {
+            0 => Some(Self::CreateRoom),
+            1 => Some(Self::JoinRoom),
+            _ => None,
+        }
+    }
+}
+
 #[tonic::async_trait]
 impl grpc_server::Grpc for MyGrpc {
     type RoomServiceStream = CreateRoomStream;
@@ -117,10 +132,9 @@ impl grpc_server::Grpc for MyGrpc {
         &self,
         request: tonic::Request<PingRequest>,
     ) -> Result<tonic::Response<PingResponse>, tonic::Status> {
-        tracing::info!("{request:?}");
-        let request = request.into_inner();
-
-        let optional_user_id = request.client_id;
+        let ping_request = request.into_inner();
+        tracing::info!(?ping_request);
+        let optional_user_id = ping_request.user_id;
 
         let ping_response = match optional_user_id {
             Some(user_id) => {
@@ -133,8 +147,8 @@ impl grpc_server::Grpc for MyGrpc {
                     })?;
 
                 PingResponse {
-                    client_id: db_user.user_id,
-                    client_name: db_user.user_name,
+                    user_id: db_user.user_id,
+                    user_name: db_user.user_name,
                 }
             }
             None => {
@@ -150,11 +164,13 @@ impl grpc_server::Grpc for MyGrpc {
                     .to_duplicate(errors::ApiError::UserAlreadyExists { user_id: user_uuid })?;
 
                 PingResponse {
-                    client_id: db_user.user_id,
-                    client_name: db_user.user_name,
+                    user_id: db_user.user_id,
+                    user_name: db_user.user_name,
                 }
             }
         };
+
+        tracing::info!(?ping_response);
 
         Ok(tonic::Response::new(ping_response))
     }
@@ -163,10 +179,15 @@ impl grpc_server::Grpc for MyGrpc {
         &self,
         request: tonic::Request<RoomServiceRequest>,
     ) -> Result<tonic::Response<Self::RoomServiceStream>, tonic::Status> {
-        tracing::info!("{request:?}");
         let request = request.into_inner();
+        tracing::info!(room_service_request=?request);
 
-        let request_type = request.request_type;
+        let request_type = RoomServiceRequestType::from_u8(request.request_type as u8).ok_or(
+            ApiError::BadRequest {
+                message: "Received invalid request type".to_string(),
+            },
+        )?;
+
         let current_user_id = request.client_id;
 
         let (response_sender, response_receiver) = mpsc::channel(128);
@@ -176,7 +197,7 @@ impl grpc_server::Grpc for MyGrpc {
         self.insert_user_channel(current_user_id.clone(), tx.clone());
 
         // Authenticate user
-        let user_from_db = self
+        let mut user_from_db = self
             .redis_client
             .get_user(current_user_id.clone())
             .await
@@ -185,8 +206,7 @@ impl grpc_server::Grpc for MyGrpc {
             })?;
 
         match request_type {
-            0 => {
-                // Create Room
+            RoomServiceRequestType::CreateRoom => {
                 let room_id = request.room_id.unwrap_or_else(|| {
                     let mut rng = rand::thread_rng();
                     rng.gen_range(100000..1000000).to_string()
@@ -216,8 +236,7 @@ impl grpc_server::Grpc for MyGrpc {
                     }
                 }
             }
-            1 => {
-                // Join the room
+            RoomServiceRequestType::JoinRoom => {
                 // This can also be used to join the common room by not passing the `room_id`
                 let room_id = request.room_id.unwrap_or(COMMON_ROOM.to_string());
 
@@ -232,6 +251,17 @@ impl grpc_server::Grpc for MyGrpc {
 
                 // Add the current user to the room
                 let room_size = room.add_user(current_user_id.clone());
+
+                // Update the user that he has been assigned to a room
+                user_from_db.assign_room_id(room_id.clone());
+
+                // Update the user in database
+                user_from_db = self
+                    .redis_client
+                    .insert_user(user_from_db.clone())
+                    .await
+                    .to_internal_api_error()?;
+
                 let room_max_capacity = room.room_size;
 
                 // Get details about all users in the room, send them update
@@ -283,17 +313,16 @@ impl grpc_server::Grpc for MyGrpc {
 
                     // Send the message to current user
                     tx.send(Message::RoomCreated {
-                        room_id: room_id,
+                        room_id: room_id.clone(),
                         users: all_users_in_room.clone(),
                     })
                     .await
                     .unwrap();
                 }
             }
-            _ => {
-                // Invalid request
-            }
         };
+
+        let cloned_redis_client = self.redis_client.clone();
 
         // This spawns a tokio task which reads from the channel and writes to the server stream
         tokio::spawn(async move {
@@ -352,7 +381,31 @@ impl grpc_server::Grpc for MyGrpc {
                     }
                 }
             }
+
             println!("Client disconnected");
+            // Remove the user from room if he is in any
+            let room_id = user_from_db.room_id.clone();
+            if let Some(room_id) = room_id {
+                let room = cloned_redis_client
+                    .get_room(room_id.clone())
+                    .await
+                    .to_not_found(ApiError::RoomNotFound {
+                        room_id: room_id.clone(),
+                    });
+
+                match room {
+                    Ok(mut room) => {
+                        room.remove_user(user_from_db.user_id.clone());
+                        cloned_redis_client.insert_room(room).await.unwrap();
+                        log::info!(
+                            "Removed user {} from the room {}",
+                            user_from_db.user_id,
+                            room_id
+                        );
+                    }
+                    Err(_) => todo!(),
+                };
+            };
         });
 
         let output_stream = tokio_stream::wrappers::ReceiverStream::new(response_receiver);

@@ -2,7 +2,7 @@ use tui_realm_stdlib::{Input, Paragraph, Radio};
 use tuirealm::{
     command::{Cmd, CmdResult},
     event::{Key, KeyEvent, KeyModifiers},
-    props::{BorderType, Borders, Style, TextSpan},
+    props::{BorderType, TextSpan},
     tui::layout as tui_layout,
     Component, Event, MockComponent, StateValue,
 };
@@ -117,8 +117,8 @@ impl MockComponent for Menu {
     }
 }
 
-impl Menu {
-    pub fn default() -> Self {
+impl Default for Menu {
+    fn default() -> Self {
         let choices = [Menus::NewGame, Menus::CreateRoom, Menus::JoinRoom]
             .iter()
             .map(|item| item.to_string())

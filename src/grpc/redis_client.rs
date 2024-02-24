@@ -1,7 +1,8 @@
 use fred::{interfaces::KeysInterface, types::MultipleKeys};
 
-use crate::{app::errors, grpc::models};
+use crate::{app::errors, grpc::storage::models};
 
+#[derive(Clone)]
 pub struct RedisClient {
     client: fred::clients::RedisClient,
 }
@@ -82,7 +83,7 @@ impl RedisClient {
             Ok(value_string_optional) => {
                 let result = value_string_optional
                     .iter()
-                    .map(|value_string| serde_json::from_str::<V>(&value_string))
+                    .map(|value_string| serde_json::from_str::<V>(value_string))
                     .collect::<Result<Vec<_>, _>>();
 
                 result.map_err(|serialize_error| {

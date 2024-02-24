@@ -1,7 +1,7 @@
-use tui_realm_stdlib::{Container, Label, List, Paragraph, Table};
+use tui_realm_stdlib::{Container, List, Paragraph, Table};
 use tuirealm::{
     command::Cmd,
-    props::{BorderType, Borders, Layout, Style, TextSpan},
+    props::{BorderType, Layout, TextSpan},
     tui::layout::Constraint,
     Component, MockComponent,
 };
@@ -33,7 +33,7 @@ pub struct Details {
 }
 
 pub struct UiState {
-    users_list: Option<List>,
+    _users_list: Option<List>,
 }
 
 impl MockComponent for Details {
@@ -55,13 +55,13 @@ impl MockComponent for Details {
 
             self.component.children[0] = room_details;
 
-            if let Some(_) = self.component.children.get(1) {
+            if self.component.children.get(1).is_some() {
                 self.component.children[1] = Box::new(users_list);
             } else {
                 self.component.children.push(Box::new(users_list))
             }
 
-            if let Some(_) = self.component.children.get(2) {
+            if self.component.children.get(2).is_some() {
                 self.component.children[2] = Box::new(user_details);
             } else {
                 self.component.children.push(Box::new(user_details))
@@ -88,18 +88,10 @@ impl MockComponent for Details {
     }
 }
 
+#[derive(Default)]
 pub struct GlobalDetails {
     active_games: u16,
     active_players: u16,
-}
-
-impl Default for GlobalDetails {
-    fn default() -> Self {
-        Self {
-            active_games: Default::default(),
-            active_players: Default::default(),
-        }
-    }
 }
 
 fn get_room_details(room_details: Option<RoomDetails>) -> Box<dyn MockComponent> {
@@ -127,7 +119,7 @@ fn get_room_details(room_details: Option<RoomDetails>) -> Box<dyn MockComponent>
     } else {
         Box::new(
             Paragraph::default()
-                .text(&[TextSpan::from("Please join a room")])
+                .text(&[TextSpan::from("Join a room to display room details")])
                 .alignment(tuirealm::props::Alignment::Center),
         )
     }
@@ -136,14 +128,7 @@ fn get_room_details(room_details: Option<RoomDetails>) -> Box<dyn MockComponent>
 fn get_users_list(user_details: Vec<model::UserDetails>) -> List {
     let user_details = user_details
         .iter()
-        .map(|user_details| {
-            vec![TextSpan::new(
-                user_details
-                    .user_name
-                    .clone()
-                    .unwrap_or("Anonymous".to_string()),
-            )]
-        })
+        .map(|user_details| vec![TextSpan::new(user_details.user_name.clone())])
         .collect::<Vec<_>>();
 
     List::default()
@@ -160,10 +145,7 @@ fn get_users_list(user_details: Vec<model::UserDetails>) -> List {
 fn get_user_information_table(user: model::UserDetails) -> Table {
     // Display all the keys on col 1
     // Display all the values on col 2
-    let first_row = vec![
-        TextSpan::new("User Name"),
-        TextSpan::new(user.user_name.unwrap_or("Anonymous".to_string())),
-    ];
+    let first_row = vec![TextSpan::new("User Name"), TextSpan::new(user.user_name)];
     let second_row = vec![
         TextSpan::new("Games Played"),
         TextSpan::new(user.games_played.to_string()),
@@ -231,7 +213,7 @@ impl Component<Msg, UserEvent> for Details {
 
                     self.state.users = users
                         .into_iter()
-                        .map(|user_details| model::UserDetails::from(user_details))
+                        .map(model::UserDetails::from)
                         .collect::<Vec<_>>();
 
                     let room_details = RoomDetails {
@@ -252,7 +234,7 @@ impl Component<Msg, UserEvent> for Details {
 
                     self.state.users = users
                         .into_iter()
-                        .map(|user_details| model::UserDetails::from(user_details))
+                        .map(model::UserDetails::from)
                         .collect::<Vec<_>>();
 
                     None

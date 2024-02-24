@@ -24,6 +24,8 @@ pub enum ApiError {
     RoomAlreadyExists { room_id: String },
     #[error("Internal Server error")]
     InternalServerError,
+    #[error("Bad Request {message}")]
+    BadRequest { message: String },
 }
 
 impl DbError {
@@ -77,6 +79,7 @@ impl From<ApiError> for tonic::Status {
             ApiError::UserAlreadyExists { .. } => tonic::Code::AlreadyExists,
             ApiError::RoomAlreadyExists { .. } => tonic::Code::AlreadyExists,
             ApiError::InternalServerError => tonic::Code::Internal,
+            ApiError::BadRequest { .. } => tonic::Code::InvalidArgument,
         };
 
         Self::new(code, api_error.to_string())

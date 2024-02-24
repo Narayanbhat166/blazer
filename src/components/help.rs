@@ -25,7 +25,7 @@ impl Default for Help {
 }
 
 impl Component<Msg, UserEvent> for Help {
-    fn on(&mut self, event: tuirealm::Event<UserEvent>) -> Option<Msg> {
+    fn on(&mut self, _event: tuirealm::Event<UserEvent>) -> Option<Msg> {
         // Change navigation information based on the user action
         None
     }

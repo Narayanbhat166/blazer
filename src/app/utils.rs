@@ -86,7 +86,7 @@ pub async fn create_redis_client(
     let client = fred::clients::RedisClient::new(config, None, None, None);
 
     // connect to the server, returning a handle to a task that drives the connection
-    let _ = client.connect();
+    client.connect();
 
     // wait for the client to connect
     let _ = client.wait_for_connect().await;

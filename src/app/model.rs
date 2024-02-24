@@ -21,7 +21,7 @@ use super::types::ClientConfig;
 #[derive(Debug, PartialEq, Clone)]
 pub struct UserDetails {
     pub user_id: String,
-    pub user_name: Option<String>,
+    pub user_name: String,
     pub games_played: u32,
     pub rank: u32,
 }
@@ -96,16 +96,13 @@ impl AppState {
                 }
             }
             AppStateUpdate::GameStart => {
-                let game_data = GameState {
-                    room_id: todo!(),
-                    game_id: todo!(),
-                    has_started: todo!(),
-                };
+                // let game_data = GameState {
+                //     room_id: todo!(),
+                //     game_id: todo!(),
+                //     has_started: todo!(),
+                // };
 
-                Self {
-                    game_details: Some(game_data),
-                    ..self
-                }
+                self
             }
         }
     }
@@ -172,7 +169,7 @@ impl Model {
                 .tick_interval(Duration::from_secs(1)),
         );
 
-        app.mount(Id::Menu, Box::new(Menu::default()), Vec::default())
+        app.mount(Id::Menu, Box::<Menu>::default(), Vec::default())
             .unwrap();
 
         app.mount(
@@ -230,8 +227,18 @@ impl Update<Msg> for Model {
                     None
                 }
                 Msg::StateUpdate(state_update) => {
+                    match &state_update {
+                        AppStateUpdate::UserIdUpdate { .. } => {}
+                        AppStateUpdate::RoomUpdate { .. } => {
+                            // This message should be received only once
+                            self.app.active(&Id::RoomDetails).unwrap();
+                        }
+                        AppStateUpdate::UserRoomJoin { .. } => {}
+                        AppStateUpdate::GameStart => todo!(),
+                    }
                     let new_state = self.state.clone().apply_update(state_update);
                     self.state = new_state;
+
                     None
                 }
             }
