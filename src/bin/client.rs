@@ -4,7 +4,7 @@ use tuirealm::{PollStrategy, Update};
 
 fn main() {
     // Read application config
-    let config = utils::read_config::<types::ClientConfig>("client_config.toml", Some("BLAZER"));
+    let config = utils::read_config::<types::ClientConfig>("config/client.toml", Some("BLAZER"));
 
     // Setup model
     let mut model = Model::new(config);

@@ -10,7 +10,7 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::subscriber::set_global_default(subscriber)?;
 
     let config =
-        utils::read_config::<types::ServerConfig>("server_config.toml", Some("BLAZER_SERVER"));
+        utils::read_config::<types::ServerConfig>("config/server.toml", Some("BLAZER_SERVER"));
 
     let redis_client = utils::create_redis_client(config.redis.unwrap_or_default())
         .await

@@ -208,6 +208,7 @@ impl Update<Msg> for Model {
             match msg {
                 Msg::AppClose => {
                     self.quit = true;
+                    self.grpc_channel.send(network::Request::Quit).unwrap();
                     None
                 }
                 Msg::NetworkUpdate | Msg::ReDraw => None,
