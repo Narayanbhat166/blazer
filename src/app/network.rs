@@ -1,6 +1,7 @@
 use std::sync::{mpsc, Arc, Mutex};
 
-use crate::grpc::server::{grpc_client, PingRequest, RoomServiceRequest};
+use crate::grpc::server::{grpc_client, PingRequest, RoomServiceRequest, RoomServiceResponse};
+use tokio::sync::mpsc as async_mpsc;
 
 use tokio_stream::StreamExt;
 use tuirealm::listener::Poll;
@@ -10,28 +11,43 @@ use super::{
     utils,
 };
 
-#[derive(PartialEq, Eq, PartialOrd, Clone)]
+#[derive(PartialEq, Eq, Clone, PartialOrd)]
 pub enum UserEvent {
-    Pong,
     InfoMessage(String),
     NetworkError(String),
-    RoomCreated { room_id: Option<String> },
+    RoomCreated {
+        room_id: String,
+        users: Vec<UserDetails>,
+    },
+    UserJoined {
+        users: Vec<UserDetails>,
+    },
     GameStart,
 }
 
+#[derive(PartialEq, Eq, PartialOrd, Clone)]
+pub struct UserDetails {
+    pub user_id: String,
+    pub user_name: String,
+    pub games_played: u32,
+    pub rank: u32,
+}
+
 pub enum NewRequestEntity {
-    Room { room_id: Option<String> },
-    Game,
+    JoinRoom { room_id: String },
+    CreateRoom,
+    NewGame,
 }
 
 pub enum Request {
     New(NewRequestEntity),
+    Quit,
 }
 
 #[derive(Clone)]
 pub struct NetworkClient {
     messsages: Arc<Mutex<Vec<UserEvent>>>,
-    client_id: Option<String>,
+    user_id: Option<String>,
 }
 
 pub trait DisplayNetworkError {
@@ -61,12 +77,86 @@ impl Default for NetworkClient {
     fn default() -> Self {
         Self {
             messsages: Arc::new(Mutex::new(vec![])),
-            client_id: None,
+            user_id: None,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum RoomMessageType {
+    Init,
+    UserJoined,
+    GameStart,
+}
+
+impl RoomMessageType {
+    pub fn from_u8(message_type_in_u8: u8) -> Self {
+        match message_type_in_u8 {
+            0 => Self::Init,
+            1 => Self::UserJoined,
+            2 => Self::GameStart,
+            _ => panic!("Unexpected value received for message type"),
+        }
+    }
+}
+
+async fn handle_room_service_stream(
+    mut network_stream: tonic::Streaming<RoomServiceResponse>,
+    network_client: NetworkClient,
+) {
+    while let Some(stream_message) = network_stream.next().await {
+        let inner_message = stream_message;
+
+        match inner_message {
+            Ok(message) => {
+                let message_type = RoomMessageType::from_u8(message.message_type as u8);
+
+                match message_type {
+                    RoomMessageType::Init => {
+                        let room_id = message
+                            .room_id
+                            .expect("Required room id, but did not find in init message");
+
+                        let users = message
+                            .user_details
+                            .into_iter()
+                            .map(Into::into)
+                            .collect::<Vec<_>>();
+
+                        let room_created_event = UserEvent::RoomCreated { room_id, users };
+
+                        network_client.push_user_event(room_created_event)
+                    }
+                    RoomMessageType::UserJoined => {
+                        let users = message
+                            .user_details
+                            .into_iter()
+                            .map(Into::into)
+                            .collect::<Vec<_>>();
+
+                        let user_joined_event = UserEvent::UserJoined { users };
+
+                        network_client.push_user_event(user_joined_event);
+                    }
+                    RoomMessageType::GameStart => {
+                        network_client.push_user_event(UserEvent::GameStart)
+                    }
+                }
+            }
+            Err(error) => {
+                let stringified_error = error.message();
+                network_client
+                    .messsages
+                    .lock()
+                    .unwrap()
+                    .push(UserEvent::NetworkError(stringified_error.to_string()));
+            }
         }
     }
 }
 
 impl NetworkClient {
+    // Start a single threaded tokio runtime
     #[tokio::main(flavor = "current_thread")]
     pub async fn start_network_client(
         &mut self,
@@ -100,31 +190,37 @@ impl NetworkClient {
             utils::read_local_storage::<types::LocalStorage>("~/.local/state/blazerapp.toml");
 
         let ping_request = PingRequest {
-            client_id: local_storage.and_then(|user_details| user_details.client_id),
+            user_id: local_storage.and_then(|user_details| user_details.client_id),
         };
 
         let ping_result = client.ping(ping_request).await;
 
         if let Some(ping_response) = ping_result.error_handler(self) {
-            let client_id = ping_response.client_id;
+            let client_id = ping_response.user_id;
 
             // Write the client_id / user_id to localstorage data to persist session
             let local_storage_data = types::LocalStorage::new(client_id.clone());
             utils::write_local_storage("~/.local/state/blazerapp.toml", local_storage_data);
 
-            self.client_id = Some(client_id);
+            self.user_id = Some(client_id);
         }
+
+        let (quit_signal_sender, mut quit_signal_receiver) = async_mpsc::channel::<bool>(1);
 
         while let Ok(message) = message_receiver.recv() {
             match message {
+                Request::Quit => {
+                    quit_signal_sender.send(true).await.unwrap();
+                }
                 Request::New(request_type) => {
                     let (request_type, room_id) = match request_type {
-                        NewRequestEntity::Room { room_id } => (0, room_id),
-                        NewRequestEntity::Game => (1, None),
+                        NewRequestEntity::JoinRoom { room_id } => (1, Some(room_id)),
+                        NewRequestEntity::NewGame => (1, None),
+                        NewRequestEntity::CreateRoom => (0, None),
                     };
 
                     let room_request = RoomServiceRequest {
-                        client_id: self.client_id.clone().unwrap(),
+                        client_id: self.user_id.clone().unwrap(),
                         room_id,
                         request_type,
                     };
@@ -134,30 +230,16 @@ impl NetworkClient {
                     let cloned_self = self.clone();
 
                     match room_stream {
-                        Some(mut stream) => {
-                            while let Some(stream_message) = stream.next().await {
-                                let inner_message = stream_message;
+                        Some(stream) => {
+                            let room_service_stream =
+                                handle_room_service_stream(stream, cloned_self);
 
-                                match inner_message {
-                                    Ok(message) => {
-                                        if message.start_game {
-                                            cloned_self.push_user_event(UserEvent::GameStart);
-                                            // Break the loop and disconnect the client as this stream is no longer needed
-                                            break;
-                                        } else {
-                                            // Since the game has not yet begun, wait for next message and do not break the loop
-                                            cloned_self.push_user_event(UserEvent::RoomCreated {
-                                                room_id: message.room_id,
-                                            })
-                                        }
-                                    }
-                                    Err(error) => {
-                                        let stringified_error = error.message();
-                                        self.messsages.lock().unwrap().push(
-                                            UserEvent::NetworkError(stringified_error.to_string()),
-                                        );
-                                    }
+                            tokio::select! {
+                                _ = room_service_stream => {}
+                                _ = quit_signal_receiver.recv() => {
+                                    return;
                                 }
+
                             }
                         }
                         None => {

@@ -2,17 +2,111 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use tuirealm::terminal::TerminalBridge;
-use tuirealm::tui::layout::{Constraint, Direction, Layout};
 use tuirealm::{Application, EventListenerCfg, Update};
 
-use crate::components::{menu::Menu, Id, Msg};
+use crate::components::menu::{self};
+use crate::components::room_details::Details;
+use crate::components::{help, menu::Menu, Id, Msg};
 use crate::{
-    app::network::{NetworkClient, UserEvent},
+    app::{
+        layout,
+        network::{NetworkClient, UserEvent},
+    },
     components::bottom_bar::BottomBar,
 };
 
 use super::network;
 use super::types::ClientConfig;
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct UserDetails {
+    pub user_id: String,
+    pub user_name: String,
+    pub games_played: u32,
+    pub rank: u32,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct RoomState {
+    room_id: String,
+    room_users: Vec<UserDetails>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct GameState {
+    room_id: String,
+    game_id: String,
+    has_started: bool,
+}
+
+#[derive(Default, Debug, PartialEq, Clone)]
+pub struct AppState {
+    user_id: Option<String>,
+    current_user: Option<UserDetails>,
+    room_details: Option<RoomState>,
+    game_details: Option<GameState>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum AppStateUpdate {
+    UserIdUpdate {
+        user_id: String,
+    },
+    RoomUpdate {
+        room_id: String,
+        users: Vec<UserDetails>,
+    },
+    UserRoomJoin {
+        users: Vec<UserDetails>,
+    },
+    GameStart,
+}
+
+impl AppState {
+    fn apply_update(self, update: AppStateUpdate) -> Self {
+        match update {
+            AppStateUpdate::UserIdUpdate { user_id } => Self {
+                user_id: Some(user_id),
+                ..self
+            },
+            AppStateUpdate::RoomUpdate { room_id, users } => {
+                let room_state = RoomState {
+                    room_id,
+                    room_users: users,
+                };
+
+                Self {
+                    room_details: Some(room_state),
+                    ..self
+                }
+            }
+            AppStateUpdate::UserRoomJoin { users } => {
+                let previous_room_state = self.room_details.expect(
+                    "Message ordering is invalid. Expected room details before user room join",
+                );
+
+                let new_room_state = RoomState {
+                    room_users: users,
+                    ..previous_room_state
+                };
+
+                Self {
+                    room_details: Some(new_room_state),
+                    ..self
+                }
+            }
+            AppStateUpdate::GameStart => {
+                // let game_data = GameState {
+                //     room_id: todo!(),
+                //     game_id: todo!(),
+                //     has_started: todo!(),
+                // };
+
+                self
+            }
+        }
+    }
+}
 
 pub struct Model {
     /// Application
@@ -24,6 +118,8 @@ pub struct Model {
     pub redraw: bool,
     /// Used to draw to terminal
     pub terminal: TerminalBridge,
+    /// State of the application
+    pub state: AppState,
 }
 
 impl Model {
@@ -42,32 +138,26 @@ impl Model {
             quit: false,
             redraw: true,
             terminal: TerminalBridge::new().expect("Cannot initialize terminal"),
+            state: AppState::default(),
         }
     }
 }
 
 impl Model {
     pub fn view(&mut self) {
-        assert!(self
-            .terminal
+        self.terminal
             .raw_mut()
             .draw(|f| {
-                let chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .margin(1)
-                    .constraints(
-                        [
-                            Constraint::Length(3), // Menu
-                            Constraint::Min(10),   // Action area
-                            Constraint::Length(3), // Bottom bar
-                        ]
-                        .as_ref(),
-                    )
-                    .split(f.size());
-                self.app.view(&Id::Menu, f, chunks[0]);
-                self.app.view(&Id::BottomBar, f, *chunks.last().unwrap());
+                let custom_layout = layout::CustomLayout::new(f.size());
+
+                self.app.view(&Id::RoomDetails, f, custom_layout.details);
+
+                self.app.view(&Id::Help, f, custom_layout.navigation);
+
+                self.app.view(&Id::Menu, f, custom_layout.menu);
+                self.app.view(&Id::BottomBar, f, custom_layout.bottom_bar);
             })
-            .is_ok());
+            .unwrap();
     }
 
     fn init_app(network_client: NetworkClient) -> Application<Id, Msg, UserEvent> {
@@ -79,7 +169,7 @@ impl Model {
                 .tick_interval(Duration::from_secs(1)),
         );
 
-        app.mount(Id::Menu, Box::new(Menu::default()), Vec::default())
+        app.mount(Id::Menu, Box::<Menu>::default(), Vec::default())
             .unwrap();
 
         app.mount(
@@ -92,6 +182,19 @@ impl Model {
         )
         .unwrap();
 
+        app.mount(
+            Id::RoomDetails,
+            Box::<Details>::default(),
+            vec![tuirealm::Sub::new(
+                tuirealm::SubEventClause::Any,
+                tuirealm::SubClause::Always,
+            )],
+        )
+        .unwrap();
+
+        app.mount(Id::Help, Box::<help::Help>::default(), Vec::default())
+            .unwrap();
+
         // Active the menu
         assert!(app.active(&Id::Menu).is_ok());
         app
@@ -101,37 +204,41 @@ impl Model {
 impl Update<Msg> for Model {
     fn update(&mut self, msg: Option<Msg>) -> Option<Msg> {
         if let Some(msg) = msg {
-            // Set redraw
             self.redraw = true;
-            // Match message
             match msg {
                 Msg::AppClose => {
-                    self.quit = true; // Terminate
+                    self.quit = true;
                     None
                 }
-                Msg::Clock => None,
-                Msg::StateUpdate => None,
-                Msg::PingServer => None,
-                Msg::SelectMenu(menu_state) => {
-                    let network_request = match menu_state {
-                        crate::components::menu::Menus::NewGame => {
-                            network::Request::New(network::NewRequestEntity::Game)
+                Msg::NetworkUpdate | Msg::ReDraw => None,
+                Msg::Menu(menu_message) => {
+                    let network_request = match menu_message {
+                        menu::MenuMessage::MenuChange | menu::MenuMessage::MenuDataChange => None,
+                        menu::MenuMessage::MenuSelect(menu_selection) => {
+                            Some(network::NewRequestEntity::from(menu_selection))
                         }
-                        crate::components::menu::Menus::CreateRoom => {
-                            network::Request::New(network::NewRequestEntity::Room { room_id: None })
-                        }
-                        crate::components::menu::Menus::JoinRoom => todo!(),
                     };
+                    if let Some(network_request) = network_request {
+                        self.grpc_channel
+                            .send(network::Request::New(network_request))
+                            .unwrap();
+                    }
 
-                    self.grpc_channel.send(network_request).unwrap();
                     None
                 }
-                Msg::JoinRoom(room_id) => {
-                    let network_request = network::Request::New(network::NewRequestEntity::Room {
-                        room_id: Some(room_id),
-                    });
+                Msg::StateUpdate(state_update) => {
+                    match &state_update {
+                        AppStateUpdate::UserIdUpdate { .. } => {}
+                        AppStateUpdate::RoomUpdate { .. } => {
+                            // This message should be received only once
+                            self.app.active(&Id::RoomDetails).unwrap();
+                        }
+                        AppStateUpdate::UserRoomJoin { .. } => {}
+                        AppStateUpdate::GameStart => todo!(),
+                    }
+                    let new_state = self.state.clone().apply_update(state_update);
+                    self.state = new_state;
 
-                    self.grpc_channel.send(network_request).unwrap();
                     None
                 }
             }

@@ -61,38 +61,32 @@ impl BottomBar {
 
 impl Component<Msg, UserEvent> for BottomBar {
     fn on(&mut self, event: tuirealm::Event<UserEvent>) -> Option<Msg> {
-        match event {
-            tuirealm::Event::User(user_event) => match user_event {
-                UserEvent::Pong => {
-                    self.set_text("Pong".to_string(), MessageType::Info);
-                    None
-                }
+        if let tuirealm::Event::User(user_event) = event {
+            match user_event {
                 UserEvent::InfoMessage(info_message) => {
                     self.set_text(info_message, MessageType::Success);
-                    Some(Msg::StateUpdate)
                 }
                 UserEvent::NetworkError(network_error) => {
                     self.set_text(network_error, MessageType::Error);
-                    Some(Msg::StateUpdate)
                 }
-                UserEvent::RoomCreated { room_id } => {
-                    let text_message = if let Some(room_id) = room_id {
-                        format!("The luxury double bedroom with room number {room_id} has been created , Waiting for your partner")
-                    } else {
-                        "The luxury double bedroom has been created, Waiting for your partner"
-                            .to_string()
-                    };
+                UserEvent::RoomCreated { room_id, .. } => {
+                    let text_message =
+                        format!("Joined room with id {room_id}. Waiting for other players to join");
 
                     self.set_text(text_message, MessageType::Success);
-
-                    Some(Msg::StateUpdate)
                 }
                 UserEvent::GameStart => {
                     self.set_text("Game will start now".to_string(), MessageType::Info);
-                    Some(Msg::StateUpdate)
                 }
-            },
-            _ => None,
-        }
+                UserEvent::UserJoined { users } => {
+                    let text = format!(
+                        "New user has joined the party, the number of users are {}",
+                        users.len()
+                    );
+                    self.set_text(text, MessageType::Info)
+                }
+            }
+        };
+        Some(Msg::NetworkUpdate)
     }
 }
