@@ -3,6 +3,9 @@ use std::sync::{mpsc, Arc, Mutex};
 use crate::grpc::server::{grpc_client, PingRequest, RoomServiceRequest, RoomServiceResponse};
 
 use tokio_stream::StreamExt;
+
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::{layer::SubscriberExt, Layer};
 use tuirealm::listener::Poll;
 
 use super::{
@@ -165,6 +168,28 @@ async fn handle_room_service_stream(
     }
 }
 
+#[cfg(feature = "client_logs")]
+fn setup_tracing() -> WorkerGuard {
+    use tracing::level_filters::LevelFilter;
+
+    let appender = tracing_appender::rolling::RollingFileAppender::new(
+        tracing_appender::rolling::Rotation::NEVER,
+        "",
+        "client_logs.json",
+    );
+
+    let (non_blocking, _guard) = tracing_appender::non_blocking(appender);
+    let file_layer = tracing_subscriber::fmt::Layer::new()
+        .with_writer(non_blocking)
+        .with_filter(LevelFilter::INFO);
+
+    let subscriber = tracing_subscriber::Registry::default().with(file_layer);
+
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+
+    _guard
+}
+
 impl NetworkClient {
     #[tokio::main]
     pub async fn start_network_client(
@@ -172,6 +197,11 @@ impl NetworkClient {
         message_receiver: mpsc::Receiver<Request>,
         config: ClientConfig,
     ) {
+        #[cfg(feature = "client_logs")]
+        let _tracing_guard = setup_tracing();
+
+        tracing::info!("network thread started");
+
         let mut client = match grpc_client::GrpcClient::connect(config.server_url.clone()).await {
             Ok(grpc_client) => {
                 let message = format!(
