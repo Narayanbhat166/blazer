@@ -58,7 +58,7 @@ pub struct MyGrpc {
 }
 
 const COMMON_ROOM: &str = "COMMON_ROOM_KEY";
-const COMMON_ROOM_SIZE: u8 = 2;
+const COMMON_ROOM_SIZE: u8 = 5;
 
 pub fn generate_name() -> String {
     let random_name_generator = rnglib::RNG::from(&rnglib::Language::Fantasy);
@@ -248,6 +248,13 @@ impl grpc_server::Grpc for MyGrpc {
                     .to_not_found(errors::ApiError::RoomNotFound {
                         room_id: room_id.clone(),
                     })?;
+
+                // Check if user is not in the current room
+                if room.users.contains(&current_user_id) {
+                    Err(errors::ApiError::BadRequest {
+                        message: "User trying to join the same room".to_string(),
+                    })?
+                }
 
                 // Add the current user to the room
                 let room_size = room.add_user(current_user_id.clone());

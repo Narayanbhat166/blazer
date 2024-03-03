@@ -1,7 +1,6 @@
 use std::sync::{mpsc, Arc, Mutex};
 
 use crate::grpc::server::{grpc_client, PingRequest, RoomServiceRequest, RoomServiceResponse};
-use tokio::sync::mpsc as async_mpsc;
 
 use tokio_stream::StreamExt;
 use tuirealm::listener::Poll;
@@ -100,49 +99,49 @@ impl RoomMessageType {
     }
 }
 
+fn handle_room_service_message(message: RoomServiceResponse, network_client: NetworkClient) {
+    let message_type = RoomMessageType::from_u8(message.message_type as u8);
+
+    match message_type {
+        RoomMessageType::Init => {
+            let room_id = message
+                .room_id
+                .expect("Required room id, but did not find in init message");
+
+            let users = message
+                .user_details
+                .into_iter()
+                .map(Into::into)
+                .collect::<Vec<_>>();
+
+            let room_created_event = UserEvent::RoomCreated { room_id, users };
+
+            network_client.push_user_event(room_created_event)
+        }
+        RoomMessageType::UserJoined => {
+            let users = message
+                .user_details
+                .into_iter()
+                .map(Into::into)
+                .collect::<Vec<_>>();
+
+            let user_joined_event = UserEvent::UserJoined { users };
+
+            network_client.push_user_event(user_joined_event);
+        }
+        RoomMessageType::GameStart => network_client.push_user_event(UserEvent::GameStart),
+    }
+}
+
 async fn handle_room_service_stream(
     mut network_stream: tonic::Streaming<RoomServiceResponse>,
     network_client: NetworkClient,
+    mut quit_signal_receiver: tokio::sync::watch::Receiver<bool>,
 ) {
-    while let Some(stream_message) = network_stream.next().await {
-        let inner_message = stream_message;
-
-        match inner_message {
-            Ok(message) => {
-                let message_type = RoomMessageType::from_u8(message.message_type as u8);
-
-                match message_type {
-                    RoomMessageType::Init => {
-                        let room_id = message
-                            .room_id
-                            .expect("Required room id, but did not find in init message");
-
-                        let users = message
-                            .user_details
-                            .into_iter()
-                            .map(Into::into)
-                            .collect::<Vec<_>>();
-
-                        let room_created_event = UserEvent::RoomCreated { room_id, users };
-
-                        network_client.push_user_event(room_created_event)
-                    }
-                    RoomMessageType::UserJoined => {
-                        let users = message
-                            .user_details
-                            .into_iter()
-                            .map(Into::into)
-                            .collect::<Vec<_>>();
-
-                        let user_joined_event = UserEvent::UserJoined { users };
-
-                        network_client.push_user_event(user_joined_event);
-                    }
-                    RoomMessageType::GameStart => {
-                        network_client.push_user_event(UserEvent::GameStart)
-                    }
-                }
-            }
+    let handle_stream_message = |stream_message: Result<_, tonic::Status>,
+                                 network_client: NetworkClient| {
+        match stream_message {
+            Ok(message) => handle_room_service_message(message, network_client),
             Err(error) => {
                 let stringified_error = error.message();
                 network_client
@@ -152,12 +151,22 @@ async fn handle_room_service_stream(
                     .push(UserEvent::NetworkError(stringified_error.to_string()));
             }
         }
+    };
+
+    loop {
+        tokio::select! {
+            Some(stream_message) = network_stream.next() => handle_stream_message(stream_message, network_client.clone()),
+            _ = quit_signal_receiver.changed() => {
+                drop(network_stream);
+                return;
+            },
+            else => return,
+        }
     }
 }
 
 impl NetworkClient {
-    // Start a single threaded tokio runtime
-    #[tokio::main(flavor = "current_thread")]
+    #[tokio::main]
     pub async fn start_network_client(
         &mut self,
         message_receiver: mpsc::Receiver<Request>,
@@ -205,12 +214,21 @@ impl NetworkClient {
             self.user_id = Some(client_id);
         }
 
-        let (quit_signal_sender, mut quit_signal_receiver) = async_mpsc::channel::<bool>(1);
+        let (quit_signal_sender, quit_signal_receiver) = tokio::sync::watch::channel(false);
+
+        let mut join_handlers = Vec::<tokio::task::JoinHandle<()>>::new();
 
         while let Ok(message) = message_receiver.recv() {
             match message {
                 Request::Quit => {
-                    quit_signal_sender.send(true).await.unwrap();
+                    // Inform all the join handles to finish their task
+                    quit_signal_sender.send(true).unwrap();
+                    for handle in join_handlers {
+                        // wait for all tasks to finish
+                        handle.await.unwrap();
+                    }
+
+                    return;
                 }
                 Request::New(request_type) => {
                     let (request_type, room_id) = match request_type {
@@ -231,16 +249,13 @@ impl NetworkClient {
 
                     match room_stream {
                         Some(stream) => {
-                            let room_service_stream =
-                                handle_room_service_stream(stream, cloned_self);
+                            let join_handler = tokio::spawn(handle_room_service_stream(
+                                stream,
+                                cloned_self,
+                                quit_signal_receiver.clone(),
+                            ));
 
-                            tokio::select! {
-                                _ = room_service_stream => {}
-                                _ = quit_signal_receiver.recv() => {
-                                    return;
-                                }
-
-                            }
+                            join_handlers.push(join_handler);
                         }
                         None => {
                             // This can happen in case the server panics

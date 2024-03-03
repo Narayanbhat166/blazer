@@ -120,6 +120,8 @@ pub struct Model {
     pub terminal: TerminalBridge,
     /// State of the application
     pub state: AppState,
+    /// In order to safely close any open connections
+    pub network_join_handler: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Model {
@@ -130,7 +132,8 @@ impl Model {
         let mut network_client = NetworkClient::default();
         let cloned_network_client = network_client.clone();
 
-        std::thread::spawn(move || network_client.start_network_client(grpc_receiver, config));
+        let join_handler =
+            std::thread::spawn(move || network_client.start_network_client(grpc_receiver, config));
 
         Self {
             app: Self::init_app(cloned_network_client),
@@ -139,6 +142,7 @@ impl Model {
             redraw: true,
             terminal: TerminalBridge::new().expect("Cannot initialize terminal"),
             state: AppState::default(),
+            network_join_handler: Some(join_handler),
         }
     }
 }
@@ -195,7 +199,7 @@ impl Model {
         app.mount(Id::Help, Box::<help::Help>::default(), Vec::default())
             .unwrap();
 
-        // Active the menu
+        // Activate the menu
         assert!(app.active(&Id::Menu).is_ok());
         app
     }
@@ -209,6 +213,9 @@ impl Update<Msg> for Model {
                 Msg::AppClose => {
                     self.quit = true;
                     self.grpc_channel.send(network::Request::Quit).unwrap();
+                    if let Some(network_join_handler) = self.network_join_handler.take() {
+                        network_join_handler.join().unwrap();
+                    }
                     None
                 }
                 Msg::NetworkUpdate | Msg::ReDraw => None,

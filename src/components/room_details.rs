@@ -1,8 +1,8 @@
-use tui_realm_stdlib::{Container, List, Paragraph, Table};
+use tui_realm_stdlib::{List, Paragraph, Table};
 use tuirealm::{
-    command::Cmd,
+    command::{Cmd, CmdResult},
     props::{BorderType, Layout, TextSpan},
-    tui::layout::Constraint,
+    tui::layout::{Constraint, Rect},
     Component, MockComponent,
 };
 
@@ -26,22 +26,48 @@ pub struct RoomDetails {
     pub current_players: usize,
 }
 
-/// Based on the screen that is currently active, show relevant information
-pub struct Details {
-    component: tui_realm_stdlib::Container,
-    state: OwnStates,
+pub struct CustomLayout {
+    room_details: Rect,
+    user_list: Rect,
+    user_details: Rect,
 }
 
-pub struct UiState {
-    _users_list: Option<List>,
+impl CustomLayout {
+    fn new(main_screen: Rect) -> Self {
+        let layout = Layout::default()
+            .constraints(&[
+                Constraint::Percentage(25),
+                Constraint::Percentage(50),
+                Constraint::Percentage(25),
+            ])
+            .direction(tuirealm::tui::layout::Direction::Vertical)
+            .chunks(main_screen);
+
+        Self {
+            room_details: layout[0],
+            user_list: layout[1],
+            user_details: layout[2],
+        }
+    }
+}
+
+/// Based on the screen that is currently active, show relevant information
+pub struct Details {
+    room_details: Box<dyn MockComponent>,
+    user_list: Option<List>,
+    user_information: Option<Table>,
+    state: OwnStates,
 }
 
 impl MockComponent for Details {
     fn view(&mut self, frame: &mut tuirealm::Frame, area: tuirealm::tui::prelude::Rect) {
-        if self.state.is_in_waiting_room {
-            let users_list = get_users_list(self.state.users.clone());
+        let room_details = get_room_details(self.state.room_details.clone());
+        self.room_details = room_details;
 
-            let room_details = get_room_details(self.state.room_details.clone());
+        if self.state.is_in_waiting_room {
+            let layout = CustomLayout::new(area);
+
+            let users_list = get_users_list(self.state.users.clone());
 
             let current_selected_user_index = users_list.states.list_index;
             let current_selected_user = self
@@ -52,39 +78,41 @@ impl MockComponent for Details {
                 .clone();
 
             let user_details = get_user_information_table(current_selected_user);
+            self.user_information = Some(user_details);
+            self.user_list = Some(users_list);
 
-            self.component.children[0] = room_details;
-
-            if self.component.children.get(1).is_some() {
-                self.component.children[1] = Box::new(users_list);
-            } else {
-                self.component.children.push(Box::new(users_list))
+            if let Some(ref mut user_list) = self.user_list {
+                user_list.view(frame, layout.user_list);
             }
 
-            if self.component.children.get(2).is_some() {
-                self.component.children[2] = Box::new(user_details);
-            } else {
-                self.component.children.push(Box::new(user_details))
+            if let Some(ref mut user_information) = self.user_information {
+                user_information.view(frame, layout.user_details);
             }
+
+            self.room_details.view(frame, layout.room_details);
+        } else {
+            self.room_details.view(frame, area);
         }
-
-        self.component.view(frame, area);
     }
 
     fn query(&self, attr: tuirealm::Attribute) -> Option<tuirealm::AttrValue> {
-        self.component.query(attr)
+        self.room_details.query(attr)
     }
 
     fn attr(&mut self, attr: tuirealm::Attribute, value: tuirealm::AttrValue) {
-        self.component.attr(attr, value)
+        self.room_details.attr(attr, value)
     }
 
     fn state(&self) -> tuirealm::State {
-        self.component.state()
+        self.room_details.state()
     }
 
     fn perform(&mut self, cmd: Cmd) -> tuirealm::command::CmdResult {
-        self.component.perform(cmd)
+        if let Some(ref mut user_list) = self.user_list {
+            user_list.perform(cmd)
+        } else {
+            CmdResult::None
+        }
     }
 }
 
@@ -119,7 +147,8 @@ fn get_room_details(room_details: Option<RoomDetails>) -> Box<dyn MockComponent>
     } else {
         Box::new(
             Paragraph::default()
-                .text(&[TextSpan::from("Join a room to display room details")])
+                .title("Room Details", tuirealm::props::Alignment::Center)
+                .text(&[TextSpan::from("Join a room to display room information")])
                 .alignment(tuirealm::props::Alignment::Center),
         )
     }
@@ -183,22 +212,10 @@ impl Default for Details {
     fn default() -> Self {
         let room_details = get_room_details(None);
 
-        let container = Container::default()
-            .title("Room Details", tuirealm::props::Alignment::Center)
-            .layout(
-                Layout::default()
-                    .constraints(&[
-                        Constraint::Percentage(25),
-                        Constraint::Percentage(50),
-                        Constraint::Percentage(25),
-                    ])
-                    .margin(1)
-                    .direction(tuirealm::tui::layout::Direction::Vertical),
-            )
-            .children(vec![room_details]);
-
         Self {
-            component: container,
+            room_details,
+            user_list: None,
+            user_information: None,
             state: OwnStates::default(),
         }
     }
