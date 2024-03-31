@@ -30,7 +30,6 @@ tracing-subscriber = "0.3.18"
 tower-http = { version = "0.5.1", features = ["trace"] }
 random_name_generator = "0.3.4"
 tower = "0.4.13"
-tracing-appender = "0.2.3"
 
 [features]
 client_logs = []

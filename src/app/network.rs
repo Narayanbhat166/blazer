@@ -4,8 +4,6 @@ use crate::grpc::server::{grpc_client, PingRequest, RoomServiceRequest, RoomServ
 
 use tokio_stream::StreamExt;
 
-use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{layer::SubscriberExt, Layer};
 use tuirealm::listener::Poll;
 
 use super::{
@@ -182,6 +180,9 @@ fn setup_tracing() {
         .unwrap();
 
     let file_layer = tracing_subscriber::fmt::Layer::new()
+        .with_ansi(false)
+        .with_level(true)
+        .with_line_number(true)
         .with_writer(log_writer)
         .with_filter(LevelFilter::INFO);
 
