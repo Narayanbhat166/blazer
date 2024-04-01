@@ -1,19 +1,15 @@
-use std::{
-    collections::VecDeque,
-    sync::{mpsc, Arc, Mutex},
-};
+use std::sync::{mpsc, Arc, Mutex};
 
 use crate::grpc::server::{grpc_client, PingRequest, RoomServiceRequest, RoomServiceResponse};
 
 use tokio_stream::StreamExt;
+
 use tuirealm::listener::Poll;
 
 use super::{
     types::{self, ClientConfig},
     utils,
 };
-
-const NETWORK_MESSAGE_QUEUE_CAPACITY: usize = 10;
 
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd)]
 pub enum UserEvent {
@@ -50,7 +46,7 @@ pub enum Request {
 
 #[derive(Clone)]
 pub struct NetworkClient {
-    messages: Arc<Mutex<VecDeque<UserEvent>>>,
+    messsages: Arc<Mutex<Vec<UserEvent>>>,
     user_id: Option<String>,
 }
 
@@ -65,9 +61,13 @@ impl<U> DisplayNetworkError for Result<tonic::Response<U>, tonic::Status> {
         match self {
             Ok(res) => Some(res.into_inner()),
             Err(tonic_status) => {
+                tracing::error!(network_error=?tonic_status);
                 let stringified_error = tonic_status.message();
                 network_client
-                    .push_user_event(UserEvent::NetworkError(stringified_error.to_string()));
+                    .messsages
+                    .lock()
+                    .unwrap()
+                    .push(UserEvent::NetworkError(stringified_error.to_string()));
                 None
             }
         }
@@ -77,9 +77,7 @@ impl<U> DisplayNetworkError for Result<tonic::Response<U>, tonic::Status> {
 impl Default for NetworkClient {
     fn default() -> Self {
         Self {
-            messages: Arc::new(Mutex::new(VecDeque::with_capacity(
-                NETWORK_MESSAGE_QUEUE_CAPACITY,
-            ))),
+            messsages: Arc::new(Mutex::new(vec![])),
             user_id: None,
         }
     }
@@ -149,7 +147,10 @@ async fn handle_room_service_stream(
             Err(error) => {
                 let stringified_error = error.message();
                 network_client
-                    .push_user_event(UserEvent::NetworkError(stringified_error.to_string()));
+                    .messsages
+                    .lock()
+                    .unwrap()
+                    .push(UserEvent::NetworkError(stringified_error.to_string()));
             }
         }
     };
@@ -166,6 +167,30 @@ async fn handle_room_service_stream(
     }
 }
 
+#[cfg(feature = "client_logs")]
+fn setup_tracing() {
+    use tracing::level_filters::LevelFilter;
+    use tracing_subscriber::layer::{Layer, SubscriberExt};
+
+    // This is a sync / blocking writer, an async / non-blockng writer will be an overkill for this purpose
+    let log_writer = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open("client_logs")
+        .unwrap();
+
+    let file_layer = tracing_subscriber::fmt::Layer::new()
+        .with_ansi(false)
+        .with_level(true)
+        .with_line_number(true)
+        .with_writer(log_writer)
+        .with_filter(LevelFilter::INFO);
+
+    let subscriber = tracing_subscriber::Registry::default().with(file_layer);
+
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+}
+
 impl NetworkClient {
     #[tokio::main]
     pub async fn start_network_client(
@@ -173,20 +198,34 @@ impl NetworkClient {
         message_receiver: mpsc::Receiver<Request>,
         config: ClientConfig,
     ) {
+        #[cfg(feature = "client_logs")]
+        setup_tracing();
+
+        tracing::info!("Network thread Started");
+
         let mut client = match grpc_client::GrpcClient::connect(config.server_url.clone()).await {
             Ok(grpc_client) => {
                 let message = format!(
                     "Successfully connected to server at address {}",
                     config.server_url
                 );
+
+                tracing::info!(
+                    "Connection to server at address {} successful",
+                    config.server_url
+                );
+
                 self.push_user_event(UserEvent::InfoMessage(message));
                 grpc_client
             }
 
             Err(network_error) => {
-                let error = format!("Connection to server failed {network_error:?}");
+                let error = format!(
+                    "Connection to server at address {} failed {network_error:?}",
+                    config.server_url
+                );
 
-                self.push_user_event(UserEvent::NetworkError(error));
+                tracing::error!(error);
 
                 // Add the retry logic for exponential retry
                 return;
@@ -201,7 +240,9 @@ impl NetworkClient {
             user_id: local_storage.and_then(|user_details| user_details.client_id),
         };
 
+        tracing::info!(?ping_request);
         let ping_result = client.ping(ping_request).await;
+        tracing::info!(?ping_result);
 
         if let Some(ping_response) = ping_result.error_handler(self) {
             let client_id = ping_response.user_id;
@@ -267,17 +308,16 @@ impl NetworkClient {
 
     fn push_user_event(&self, event: UserEvent) {
         tracing::info!(push_user_event=?event);
-        self.messages.lock().unwrap().push_back(event)
     }
 }
 
 impl Poll<UserEvent> for NetworkClient {
     fn poll(&mut self) -> tuirealm::listener::ListenerResult<Option<tuirealm::Event<UserEvent>>> {
         Ok(self
-            .messages
+            .messsages
             .lock()
             .unwrap()
-            .pop_front()
+            .pop()
             .map(tuirealm::Event::User))
     }
 }
