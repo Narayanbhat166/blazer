@@ -6,8 +6,11 @@ use blazer::{
 // Single threaded runtime
 #[tokio::main(flavor = "current_thread")]
 pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let subscriber = tracing_subscriber::FmtSubscriber::new();
-    tracing::subscriber::set_global_default(subscriber)?;
+    let formatter = tracing_subscriber::fmt::format()
+        .with_file(true)
+        .with_line_number(true);
+
+    tracing_subscriber::fmt().event_format(formatter).init();
 
     let config =
         utils::read_config::<types::ServerConfig>("config/server.toml", Some("BLAZER_SERVER"));
