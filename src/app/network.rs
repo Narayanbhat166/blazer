@@ -195,7 +195,7 @@ impl NetworkClient {
 
         // Read the client details from ~/.local/state/blazerapp.toml for a returning user
         let local_storage =
-            utils::read_local_storage::<types::LocalStorage>("~/.local/state/blazerapp.toml");
+            utils::read_local_storage::<types::LocalStorage>("~/.local/state/blazerapp.toml").await;
 
         let ping_request = PingRequest {
             user_id: local_storage.and_then(|user_details| user_details.client_id),
@@ -208,7 +208,7 @@ impl NetworkClient {
 
             // Write the client_id / user_id to localstorage data to persist session
             let local_storage_data = types::LocalStorage::new(client_id.clone());
-            utils::write_local_storage("~/.local/state/blazerapp.toml", local_storage_data);
+            utils::write_local_storage("~/.local/state/blazerapp.toml", local_storage_data).await;
 
             self.user_id = Some(client_id);
         }

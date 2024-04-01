@@ -26,11 +26,17 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = server_address.parse().unwrap();
     tracing::info!("Attempting to run server on {:?}", addr);
 
-    let server = MyGrpc::new(redis_client).await;
+    let service = MyGrpc::new(redis_client).await;
     tracing::info!("Server successfully running on {:?}", addr);
 
+    let reflection_service = tonic_reflection::server::Builder::configure()
+        .register_encoded_file_descriptor_set(blazer::grpc::server::FILE_DESCRIPTOR_SET)
+        .build()
+        .unwrap();
+
     tonic::transport::Server::builder()
-        .add_service(grpc_server::GrpcServer::new(server))
+        .add_service(reflection_service)
+        .add_service(grpc_server::GrpcServer::new(service))
         .serve(addr)
         .await?;
 

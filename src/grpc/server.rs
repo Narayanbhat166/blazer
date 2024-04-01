@@ -5,7 +5,7 @@ use std::{
 
 pub use blazer_grpc::{
     grpc_client, grpc_server, PingRequest, PingResponse, RoomServiceRequest, RoomServiceResponse,
-    UserDetails,
+    UserDetails, FILE_DESCRIPTOR_SET,
 };
 
 use rand::Rng;
@@ -20,6 +20,8 @@ use crate::{
 mod blazer_grpc {
     // The string specified here must match the proto package name
     tonic::include_proto!("server");
+
+    pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("grpc");
 }
 
 impl From<models::User> for UserDetails {

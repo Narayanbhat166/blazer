@@ -1,4 +1,4 @@
-use std::{fs, io::Write};
+use tokio::{fs, io::AsyncWriteExt};
 
 use crate::grpc;
 use config::{Config, Environment, File, FileFormat};
@@ -41,12 +41,13 @@ fn replace_home_dir(file_name: &str) -> String {
 /// Read a file from local storage
 ///
 /// Return `None` if file is not present
-pub fn read_local_storage<T>(file_name: &str) -> Option<T>
+pub async fn read_local_storage<T>(file_name: &str) -> Option<T>
 where
     T: serde::de::DeserializeOwned,
 {
     let file_name = replace_home_dir(file_name);
     fs::read_to_string(file_name)
+        .await
         .ok()
         .map(|file_contents| toml::from_str::<T>(&file_contents).expect("Invalid data in file"))
 }
@@ -54,16 +55,23 @@ where
 /// Write the given string to file in local storage
 ///
 /// Create the file if it does not exist
-pub fn write_local_storage<T>(file_name: &str, data: T)
+pub async fn write_local_storage<T>(file_name: &str, data: T)
 where
     T: serde::Serialize,
 {
     let file_name = replace_home_dir(file_name);
     let file_contents = toml::to_string(&data).expect("Cannot convert data to toml representation");
 
-    if fs::write(&file_name, file_contents.as_bytes()).is_err() {
-        let mut file = fs::File::create(file_name).expect("Cannot create the file");
+    if fs::write(&file_name, file_contents.as_bytes())
+        .await
+        .is_err()
+    {
+        let mut file = fs::File::create(file_name)
+            .await
+            .expect("Cannot create the file");
+
         file.write_all(file_contents.as_bytes())
+            .await
             .expect("Cannot write to file");
     }
 }
