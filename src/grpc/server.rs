@@ -126,6 +126,10 @@ impl RoomServiceRequestType {
     }
 }
 
+/// A generic wrapper for all the server functions
+/// Authenticates the user and fetches user data
+fn server_wrap() {}
+
 #[tonic::async_trait]
 impl grpc_server::Grpc for MyGrpc {
     type RoomServiceStream = CreateRoomStream;
