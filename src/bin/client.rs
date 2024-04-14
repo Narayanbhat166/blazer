@@ -1,4 +1,7 @@
-use blazer::app::{model::Model, types, utils};
+use blazer::app::{
+    client::{model::Model, types},
+    utils,
+};
 
 use tuirealm::{PollStrategy, Update};
 

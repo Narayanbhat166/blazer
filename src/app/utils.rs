@@ -1,11 +1,7 @@
 use tokio::{fs, io::AsyncWriteExt};
 
-use crate::grpc;
 use config::{Config, Environment, File, FileFormat};
-use fred::interfaces::ClientLike;
 use serde::Deserialize;
-
-use crate::app::types::RedisConfig;
 
 pub fn read_config<'a, T>(file_name: &str, env_prefix: Option<&str>) -> T
 where
@@ -74,30 +70,4 @@ where
             .await
             .expect("Cannot write to file");
     }
-}
-
-pub async fn create_redis_client(
-    redis_config: RedisConfig,
-) -> Result<grpc::redis_client::RedisClient, fred::error::RedisError> {
-    let config = fred::types::RedisConfig {
-        server: fred::types::ServerConfig::Centralized {
-            server: fred::types::Server {
-                host: redis_config.host.into(),
-                port: redis_config.port,
-            },
-        },
-        username: redis_config.username,
-        password: redis_config.password,
-        ..fred::types::RedisConfig::default()
-    };
-
-    let client = fred::clients::RedisClient::new(config, None, None, None);
-
-    // connect to the server, returning a handle to a task that drives the connection
-    client.connect();
-
-    // wait for the client to connect
-    let _ = client.wait_for_connect().await;
-
-    Ok(grpc::redis_client::RedisClient::new(client))
 }

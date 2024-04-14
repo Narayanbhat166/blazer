@@ -1,9 +1,7 @@
 use tui_realm_stdlib::Table;
 use tuirealm::{props::TextSpan, Component, MockComponent};
 
-use crate::app::network::UserEvent;
-
-use super::Msg;
+use super::{Msg, UserEvent};
 
 #[derive(MockComponent)]
 pub struct Help {

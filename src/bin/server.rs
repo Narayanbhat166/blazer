@@ -1,6 +1,9 @@
 use blazer::{
     app::{types, utils},
-    grpc::server::{grpc_server, MyGrpc},
+    grpc::{
+        server::{grpc_server, MyGrpc},
+        utils::create_redis_client,
+    },
 };
 
 // Single threaded runtime
@@ -15,7 +18,7 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config =
         utils::read_config::<types::ServerConfig>("config/server.toml", Some("BLAZER_SERVER"));
 
-    let redis_client = utils::create_redis_client(config.redis.unwrap_or_default())
+    let redis_client = create_redis_client(config.redis.unwrap_or_default())
         .await
         .unwrap();
 

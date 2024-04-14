@@ -1,3 +1,5 @@
+/// The bottom bar is used to show network activity
+/// After every user event, the bottom bar is updated with the response of the network activity
 use tui_realm_stdlib::{Container, Label};
 use tuirealm::{
     props::{Color, Layout},
@@ -5,7 +7,7 @@ use tuirealm::{
     Component, MockComponent,
 };
 
-use crate::app::network::UserEvent;
+use crate::app::client::network::types::UserEvent;
 
 use super::Msg;
 
@@ -87,6 +89,6 @@ impl Component<Msg, UserEvent> for BottomBar {
                 }
             }
         };
-        Some(Msg::NetworkUpdate)
+        Some(Msg::BottomBarUpdate)
     }
 }

@@ -1,132 +1,42 @@
+/// This file contains the application model
 use std::sync::mpsc;
 use std::time::Duration;
 
 use tuirealm::terminal::TerminalBridge;
 use tuirealm::{Application, EventListenerCfg, Update};
 
-use crate::components::menu::{self};
-use crate::components::room_details::Details;
-use crate::components::{help, menu::Menu, Id, Msg};
-use crate::{
-    app::{
-        layout,
-        network::{NetworkClient, UserEvent},
-    },
-    components::bottom_bar::BottomBar,
+use crate::app::client::{
+    components,
+    types::{self, Id, Msg},
+};
+
+use super::{
+    layout,
+    network::{types::UserEvent, NetworkClient},
 };
 
 use super::network;
 use super::types::ClientConfig;
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct UserDetails {
-    pub user_id: String,
-    pub user_name: String,
-    pub games_played: u32,
-    pub rank: u32,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct RoomState {
-    room_id: String,
-    room_users: Vec<UserDetails>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct GameState {
-    room_id: String,
-    game_id: String,
-    has_started: bool,
-}
-
-#[derive(Default, Debug, PartialEq, Clone)]
-pub struct AppState {
-    user_id: Option<String>,
-    current_user: Option<UserDetails>,
-    room_details: Option<RoomState>,
-    game_details: Option<GameState>,
-}
-
-#[derive(Debug, PartialEq)]
-pub enum AppStateUpdate {
-    UserIdUpdate {
-        user_id: String,
-    },
-    RoomUpdate {
-        room_id: String,
-        users: Vec<UserDetails>,
-    },
-    UserRoomJoin {
-        users: Vec<UserDetails>,
-    },
-    GameStart,
-}
-
-impl AppState {
-    fn apply_update(self, update: AppStateUpdate) -> Self {
-        match update {
-            AppStateUpdate::UserIdUpdate { user_id } => Self {
-                user_id: Some(user_id),
-                ..self
-            },
-            AppStateUpdate::RoomUpdate { room_id, users } => {
-                let room_state = RoomState {
-                    room_id,
-                    room_users: users,
-                };
-
-                Self {
-                    room_details: Some(room_state),
-                    ..self
-                }
-            }
-            AppStateUpdate::UserRoomJoin { users } => {
-                let previous_room_state = self.room_details.expect(
-                    "Message ordering is invalid. Expected room details before user room join",
-                );
-
-                let new_room_state = RoomState {
-                    room_users: users,
-                    ..previous_room_state
-                };
-
-                Self {
-                    room_details: Some(new_room_state),
-                    ..self
-                }
-            }
-            AppStateUpdate::GameStart => {
-                // let game_data = GameState {
-                //     room_id: todo!(),
-                //     game_id: todo!(),
-                //     has_started: todo!(),
-                // };
-
-                self
-            }
-        }
-    }
-}
-
 pub struct Model {
     /// Application
     pub app: Application<Id, Msg, UserEvent>,
     /// Indicates that the application must quit
-    pub grpc_channel: mpsc::Sender<network::Request>,
+    pub grpc_channel: mpsc::Sender<network::types::Request>,
     pub quit: bool,
     /// Tells whether to redraw interface
     pub redraw: bool,
     /// Used to draw to terminal
     pub terminal: TerminalBridge,
     /// State of the application
-    pub state: AppState,
+    pub state: types::AppState,
     /// In order to safely close any open connections
     pub network_join_handler: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Model {
     pub fn new(config: ClientConfig) -> Self {
-        let (grpc_sender, grpc_receiver) = mpsc::channel::<network::Request>();
+        let (grpc_sender, grpc_receiver) = mpsc::channel::<network::types::Request>();
         // start the network client
 
         let mut network_client = NetworkClient::default();
@@ -141,7 +51,7 @@ impl Model {
             quit: false,
             redraw: true,
             terminal: TerminalBridge::new().expect("Cannot initialize terminal"),
-            state: AppState::default(),
+            state: types::AppState::default(),
             network_join_handler: Some(join_handler),
         }
     }
@@ -173,12 +83,16 @@ impl Model {
                 .tick_interval(Duration::from_secs(1)),
         );
 
-        app.mount(Id::Menu, Box::<Menu>::default(), Vec::default())
-            .unwrap();
+        app.mount(
+            Id::Menu,
+            Box::<components::menu::Menu>::default(),
+            Vec::default(),
+        )
+        .unwrap();
 
         app.mount(
             Id::BottomBar,
-            Box::<BottomBar>::default(),
+            Box::<components::bottom_bar::BottomBar>::default(),
             vec![tuirealm::Sub::new(
                 tuirealm::SubEventClause::Any,
                 tuirealm::SubClause::Always,
@@ -188,7 +102,7 @@ impl Model {
 
         app.mount(
             Id::RoomDetails,
-            Box::<Details>::default(),
+            Box::<components::room_details::Details>::default(),
             vec![tuirealm::Sub::new(
                 tuirealm::SubEventClause::Any,
                 tuirealm::SubClause::Always,
@@ -196,8 +110,12 @@ impl Model {
         )
         .unwrap();
 
-        app.mount(Id::Help, Box::<help::Help>::default(), Vec::default())
-            .unwrap();
+        app.mount(
+            Id::Help,
+            Box::<components::help::Help>::default(),
+            Vec::default(),
+        )
+        .unwrap();
 
         // Activate the menu
         assert!(app.active(&Id::Menu).is_ok());
@@ -212,23 +130,25 @@ impl Update<Msg> for Model {
             match msg {
                 Msg::AppClose => {
                     self.quit = true;
-                    self.grpc_channel.send(network::Request::Quit).unwrap();
+                    self.grpc_channel
+                        .send(network::types::Request::Quit)
+                        .unwrap();
                     if let Some(network_join_handler) = self.network_join_handler.take() {
                         network_join_handler.join().unwrap();
                     }
                     None
                 }
-                Msg::NetworkUpdate | Msg::ReDraw => None,
+                Msg::BottomBarUpdate | Msg::ReDraw => None,
                 Msg::Menu(menu_message) => {
                     let network_request = match menu_message {
-                        menu::MenuMessage::MenuChange | menu::MenuMessage::MenuDataChange => None,
-                        menu::MenuMessage::MenuSelect(menu_selection) => {
-                            Some(network::NewRequestEntity::from(menu_selection))
+                        types::MenuMessage::MenuChange | types::MenuMessage::MenuDataChange => None,
+                        types::MenuMessage::MenuSelect(menu_selection) => {
+                            Some(network::types::NewRequestEntity::from(menu_selection))
                         }
                     };
                     if let Some(network_request) = network_request {
                         self.grpc_channel
-                            .send(network::Request::New(network_request))
+                            .send(network::types::Request::New(network_request))
                             .unwrap();
                     }
 
@@ -236,13 +156,13 @@ impl Update<Msg> for Model {
                 }
                 Msg::StateUpdate(state_update) => {
                     match &state_update {
-                        AppStateUpdate::UserIdUpdate { .. } => {}
-                        AppStateUpdate::RoomUpdate { .. } => {
+                        types::AppStateUpdate::UserIdUpdate { .. } => {}
+                        types::AppStateUpdate::RoomUpdate { .. } => {
                             // This message should be received only once
                             self.app.active(&Id::RoomDetails).unwrap();
                         }
-                        AppStateUpdate::UserRoomJoin { .. } => {}
-                        AppStateUpdate::GameStart => todo!(),
+                        types::AppStateUpdate::UserRoomJoin { .. } => {}
+                        types::AppStateUpdate::GameStart => todo!(),
                     }
                     let new_state = self.state.clone().apply_update(state_update);
                     self.state = new_state;

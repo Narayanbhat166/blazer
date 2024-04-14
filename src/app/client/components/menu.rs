@@ -7,10 +7,9 @@ use tuirealm::{
     Component, Event, MockComponent, StateValue,
 };
 
-use crate::{
-    app::network::{self, UserEvent},
-    components::Msg,
-};
+use super::{Msg, UserEvent};
+
+use crate::app::client::types::{MenuMessage, MenuSelection};
 
 #[derive(Default, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -19,30 +18,6 @@ enum Menus {
     NewGame = 0,
     CreateRoom = 1,
     JoinRoom = 2,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum MenuSelection {
-    NewGame,
-    CreateRoom,
-    JoinRoom { room_id: String },
-}
-
-impl From<MenuSelection> for network::NewRequestEntity {
-    fn from(item_selection: MenuSelection) -> Self {
-        match item_selection {
-            MenuSelection::NewGame => network::NewRequestEntity::NewGame,
-            MenuSelection::CreateRoom => network::NewRequestEntity::CreateRoom,
-            MenuSelection::JoinRoom { room_id } => network::NewRequestEntity::JoinRoom { room_id },
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum MenuMessage {
-    MenuChange,
-    MenuDataChange,
-    MenuSelect(MenuSelection),
 }
 
 impl Menus {

@@ -1,22 +1,4 @@
 #[derive(serde::Deserialize)]
-pub struct ClientConfig {
-    pub server_url: String,
-}
-
-#[derive(serde::Deserialize, serde::Serialize)]
-pub struct LocalStorage {
-    pub client_id: Option<String>,
-}
-
-impl LocalStorage {
-    pub fn new(client_id: String) -> Self {
-        Self {
-            client_id: Some(client_id),
-        }
-    }
-}
-
-#[derive(serde::Deserialize)]
 pub struct ServerConfig {
     pub server: Option<Server>,
     pub redis: Option<RedisConfig>,

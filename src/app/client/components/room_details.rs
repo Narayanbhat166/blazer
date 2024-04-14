@@ -6,13 +6,13 @@ use tuirealm::{
     Component, MockComponent,
 };
 
-use crate::app::{model, network::UserEvent};
+use crate::app::client::types::UserDetails;
 
-use super::Msg;
+use super::{Msg, UserEvent};
 
 #[derive(Default)]
 pub struct OwnStates {
-    pub users: Vec<model::UserDetails>,
+    pub users: Vec<UserDetails>,
     pub global_details: GlobalDetails,
     pub room_details: Option<RoomDetails>,
     pub is_in_waiting_room: bool,
@@ -154,7 +154,7 @@ fn get_room_details(room_details: Option<RoomDetails>) -> Box<dyn MockComponent>
     }
 }
 
-fn get_users_list(user_details: Vec<model::UserDetails>) -> List {
+fn get_users_list(user_details: Vec<UserDetails>) -> List {
     let user_details = user_details
         .iter()
         .map(|user_details| vec![TextSpan::new(user_details.user_name.clone())])
@@ -171,7 +171,7 @@ fn get_users_list(user_details: Vec<model::UserDetails>) -> List {
 }
 
 #[allow(dead_code)]
-fn get_user_information_table(user: model::UserDetails) -> Table {
+fn get_user_information_table(user: UserDetails) -> Table {
     // Display all the keys on col 1
     // Display all the values on col 2
     let first_row = vec![TextSpan::new("User Name"), TextSpan::new(user.user_name)];
@@ -228,10 +228,7 @@ impl Component<Msg, UserEvent> for Details {
                 UserEvent::RoomCreated { room_id, users } => {
                     let current_players = users.len();
 
-                    self.state.users = users
-                        .into_iter()
-                        .map(model::UserDetails::from)
-                        .collect::<Vec<_>>();
+                    self.state.users = users.into_iter().map(UserDetails::from).collect::<Vec<_>>();
 
                     let room_details = RoomDetails {
                         room_id,
@@ -249,10 +246,7 @@ impl Component<Msg, UserEvent> for Details {
                         room_details.current_players = users.len();
                     }
 
-                    self.state.users = users
-                        .into_iter()
-                        .map(model::UserDetails::from)
-                        .collect::<Vec<_>>();
+                    self.state.users = users.into_iter().map(UserDetails::from).collect::<Vec<_>>();
 
                     None
                 }

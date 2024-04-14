@@ -1,5 +1,5 @@
-use crate::app::model::UserDetails as AppUserDetails;
-use crate::app::network::UserDetails as NetworkUserDetails;
+use crate::app::client::network::types::UserDetails as NetworkUserDetails;
+use crate::app::client::types::UserDetails as AppUserDetails;
 use crate::grpc::server::UserDetails as GrpcUserDetails;
 
 impl From<NetworkUserDetails> for GrpcUserDetails {

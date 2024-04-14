@@ -1,9 +1,9 @@
 use tui_realm_stdlib::Phantom;
 use tuirealm::{Component, MockComponent};
 
-use crate::app::{model::AppStateUpdate, network::UserEvent};
+use crate::app::client::types::AppStateUpdate;
 
-use super::Msg;
+use super::{Msg, UserEvent};
 
 /// This component acts upon the state updates because of network events
 #[derive(MockComponent, Default)]

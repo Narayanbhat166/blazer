@@ -3,50 +3,20 @@ use std::{
     sync::{mpsc, Arc, Mutex},
 };
 
-use crate::grpc::server::{grpc_client, PingRequest, RoomServiceRequest, RoomServiceResponse};
+pub mod types;
+
+use crate::{
+    app::utils,
+    grpc::server::{grpc_client, PingRequest, RoomServiceRequest, RoomServiceResponse},
+};
 
 use tokio_stream::StreamExt;
 use tuirealm::listener::Poll;
 
-use super::{
-    types::{self, ClientConfig},
-    utils,
-};
+use super::network::types::UserEvent;
+use super::types::{ClientConfig, LocalStorage};
 
 const NETWORK_MESSAGE_QUEUE_CAPACITY: usize = 10;
-
-#[derive(Debug, PartialEq, Eq, Clone, PartialOrd)]
-pub enum UserEvent {
-    InfoMessage(String),
-    NetworkError(String),
-    RoomCreated {
-        room_id: String,
-        users: Vec<UserDetails>,
-    },
-    UserJoined {
-        users: Vec<UserDetails>,
-    },
-    GameStart,
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Clone)]
-pub struct UserDetails {
-    pub user_id: String,
-    pub user_name: String,
-    pub games_played: u32,
-    pub rank: u32,
-}
-
-pub enum NewRequestEntity {
-    JoinRoom { room_id: String },
-    CreateRoom,
-    NewGame,
-}
-
-pub enum Request {
-    New(NewRequestEntity),
-    Quit,
-}
 
 #[derive(Clone)]
 pub struct NetworkClient {
@@ -170,7 +140,7 @@ impl NetworkClient {
     #[tokio::main]
     pub async fn start_network_client(
         &mut self,
-        message_receiver: mpsc::Receiver<Request>,
+        message_receiver: mpsc::Receiver<types::Request>,
         config: ClientConfig,
     ) {
         let mut client = match grpc_client::GrpcClient::connect(config.server_url.clone()).await {
@@ -195,7 +165,7 @@ impl NetworkClient {
 
         // Read the client details from ~/.local/state/blazerapp.toml for a returning user
         let local_storage =
-            utils::read_local_storage::<types::LocalStorage>("~/.local/state/blazerapp.toml").await;
+            utils::read_local_storage::<LocalStorage>("~/.local/state/blazerapp.toml").await;
 
         let ping_request = PingRequest {
             user_id: local_storage.and_then(|user_details| user_details.client_id),
@@ -207,7 +177,7 @@ impl NetworkClient {
             let client_id = ping_response.user_id;
 
             // Write the client_id / user_id to localstorage data to persist session
-            let local_storage_data = types::LocalStorage::new(client_id.clone());
+            let local_storage_data = LocalStorage::new(client_id.clone());
             utils::write_local_storage("~/.local/state/blazerapp.toml", local_storage_data).await;
 
             self.user_id = Some(client_id);
@@ -219,7 +189,7 @@ impl NetworkClient {
 
         while let Ok(message) = message_receiver.recv() {
             match message {
-                Request::Quit => {
+                types::Request::Quit => {
                     // Inform all the join handles to finish their task
                     quit_signal_sender.send(true).unwrap();
                     for handle in join_handlers {
@@ -229,11 +199,11 @@ impl NetworkClient {
 
                     return;
                 }
-                Request::New(request_type) => {
+                types::Request::New(request_type) => {
                     let (request_type, room_id) = match request_type {
-                        NewRequestEntity::JoinRoom { room_id } => (1, Some(room_id)),
-                        NewRequestEntity::NewGame => (1, None),
-                        NewRequestEntity::CreateRoom => (0, None),
+                        types::NewRequestEntity::JoinRoom { room_id } => (1, Some(room_id)),
+                        types::NewRequestEntity::NewGame => (1, None),
+                        types::NewRequestEntity::CreateRoom => (0, None),
                     };
 
                     let room_request = RoomServiceRequest {

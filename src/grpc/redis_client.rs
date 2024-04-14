@@ -1,6 +1,7 @@
 use fred::{interfaces::KeysInterface, types::MultipleKeys};
 
-use crate::{app::errors, grpc::storage::models};
+use crate::app::server::errors;
+use crate::grpc::storage::models;
 
 #[derive(Clone)]
 pub struct RedisClient {
