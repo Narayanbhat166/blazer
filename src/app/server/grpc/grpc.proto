@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package server;
+
+service Grpc {
+  rpc Ping (PingRequest) returns (PingResponse);
+
+  // Use this function for creating all different types of rooms
+  rpc RoomService (RoomServiceRequest) returns (stream RoomServiceResponse);
+}
+
+message RoomServiceRequest {
+  enum RequestType {
+    REQUEST_TYPE_UNSPECIFIED = 0;
+    REQUEST_TYPE_CREATE_ROOM = 1;
+    REQUEST_TYPE_JOIN_ROOM = 2;
+  }
+  string client_id = 1;
+  optional string room_id = 2;
+  RequestType request_type = 3;
+}
+
+message UserDetails {
+  string user_id = 1;
+  string user_name = 2;
+  uint32 games_played = 3;
+  uint32 rank = 4;
+}
+
+message RoomServiceResponse {
+  enum MessageType {
+    MESSAGE_TYPE_UNSPECIFIED = 0;
+    MESSAGE_TYPE_INIT = 1;
+    MESSAGE_TYPE_USER_JOINED = 2;
+    MESSAGE_TYPE_GAME_START = 3;
+  }
+  optional string room_id = 1;
+  MessageType message_type = 2;
+  repeated UserDetails user_details = 3;
+}
+
+message PingRequest {
+  optional string user_id = 1;
+}
+
+message Register {
+
+}
+
+message Authenticate {
+  string user_id = 1;
+}
+
+message PingResponse {
+  string user_id = 1;
+  string user_name = 2;
+}
