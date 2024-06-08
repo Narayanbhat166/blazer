@@ -1,6 +1,6 @@
 use crate::app::client::network::types::UserDetails as NetworkUserDetails;
 use crate::app::client::types::UserDetails as AppUserDetails;
-use crate::grpc::server::UserDetails as GrpcUserDetails;
+use crate::app::server::grpc::server::UserDetails as GrpcUserDetails;
 
 impl From<NetworkUserDetails> for GrpcUserDetails {
     fn from(network_user: NetworkUserDetails) -> Self {

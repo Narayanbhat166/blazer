@@ -1,16 +1,21 @@
 use blazer::app::{
-    client::{model::Model, types},
+    client::{
+        model::{ClientArgs, Model},
+        types,
+    },
     utils,
 };
 
+use clap::Parser;
 use tuirealm::{PollStrategy, Update};
 
 fn main() {
+    let args = ClientArgs::parse();
     // Read application config
     let config = utils::read_config::<types::ClientConfig>("config/client.toml", Some("BLAZER"));
 
     // Setup model
-    let mut model = Model::new(config);
+    let mut model = Model::new(config, args);
     // Enter alternate screen
     let _ = model.terminal.enter_alternate_screen();
     let _ = model.terminal.enable_raw_mode();

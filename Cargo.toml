@@ -31,6 +31,7 @@ tower-http = { version = "0.5.1", features = ["trace"] }
 random_name_generator = "0.3.4"
 tower = "*"
 tonic-reflection = "0.11"
+clap = { version = "4.5.6", features = ["derive"] }
 
 [features]
 client_logs = []

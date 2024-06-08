@@ -1,9 +1,9 @@
-use blazer::{
-    app::{types, utils},
-    grpc::{
-        server::{grpc_server, MyGrpc},
+use blazer::app::{
+    server::grpc::{
+        server::{grpc_server, MyGrpc, FILE_DESCRIPTOR_SET},
         utils::create_redis_client,
     },
+    types, utils,
 };
 
 // Single threaded runtime
@@ -33,7 +33,7 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Server successfully running on {:?}", addr);
 
     let reflection_service = tonic_reflection::server::Builder::configure()
-        .register_encoded_file_descriptor_set(blazer::grpc::server::FILE_DESCRIPTOR_SET)
+        .register_encoded_file_descriptor_set(FILE_DESCRIPTOR_SET)
         .build()
         .unwrap();
 

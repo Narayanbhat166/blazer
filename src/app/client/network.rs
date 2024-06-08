@@ -5,9 +5,10 @@ use std::{
 
 pub mod types;
 
-use crate::{
-    app::utils,
-    grpc::server::{grpc_client, PingRequest, RoomServiceRequest, RoomServiceResponse},
+use crate::app::{client::model::ClientArgs, types::RoomServiceResponseType, utils};
+
+use crate::app::server::grpc::server::{
+    grpc_client, PingRequest, RoomServiceRequest, RoomServiceResponse,
 };
 
 use tokio_stream::StreamExt;
@@ -55,29 +56,11 @@ impl Default for NetworkClient {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-enum RoomMessageType {
-    Init,
-    UserJoined,
-    GameStart,
-}
-
-impl RoomMessageType {
-    pub fn from_u8(message_type_in_u8: u8) -> Self {
-        match message_type_in_u8 {
-            0 => Self::Init,
-            1 => Self::UserJoined,
-            2 => Self::GameStart,
-            _ => panic!("Unexpected value received for message type"),
-        }
-    }
-}
-
 fn handle_room_service_message(message: RoomServiceResponse, network_client: NetworkClient) {
-    let message_type = RoomMessageType::from_u8(message.message_type as u8);
+    let message_type = RoomServiceResponseType::from_u8(message.message_type as u8).unwrap();
 
     match message_type {
-        RoomMessageType::Init => {
+        RoomServiceResponseType::Init => {
             let room_id = message
                 .room_id
                 .expect("Required room id, but did not find in init message");
@@ -92,7 +75,7 @@ fn handle_room_service_message(message: RoomServiceResponse, network_client: Net
 
             network_client.push_user_event(room_created_event)
         }
-        RoomMessageType::UserJoined => {
+        RoomServiceResponseType::UserJoined => {
             let users = message
                 .user_details
                 .into_iter()
@@ -103,7 +86,7 @@ fn handle_room_service_message(message: RoomServiceResponse, network_client: Net
 
             network_client.push_user_event(user_joined_event);
         }
-        RoomMessageType::GameStart => network_client.push_user_event(UserEvent::GameStart),
+        RoomServiceResponseType::GameStart => network_client.push_user_event(UserEvent::GameStart),
     }
 }
 
@@ -142,6 +125,7 @@ impl NetworkClient {
         &mut self,
         message_receiver: mpsc::Receiver<types::Request>,
         config: ClientConfig,
+        args: ClientArgs,
     ) {
         let mut client = match grpc_client::GrpcClient::connect(config.server_url.clone()).await {
             Ok(grpc_client) => {
@@ -163,13 +147,19 @@ impl NetworkClient {
             }
         };
 
-        // Read the client details from ~/.local/state/blazerapp.toml for a returning user
-        let local_storage =
-            utils::read_local_storage::<LocalStorage>("~/.local/state/blazerapp.toml").await;
+        // Use existing customer based on the args passed ( create_guest )
+        let ping_request = if args.create_guest {
+            PingRequest { user_id: None }
+        } else {
+            let local_storage =
+                utils::read_local_storage::<LocalStorage>("~/.local/state/blazerapp.toml").await;
 
-        let ping_request = PingRequest {
-            user_id: local_storage.and_then(|user_details| user_details.client_id),
+            PingRequest {
+                user_id: local_storage.and_then(|user_details| user_details.client_id),
+            }
         };
+
+        // Read the client details from ~/.local/state/blazerapp.toml for a returning user
 
         let ping_result = client.ping(ping_request).await;
 
@@ -201,9 +191,9 @@ impl NetworkClient {
                 }
                 types::Request::New(request_type) => {
                     let (request_type, room_id) = match request_type {
-                        types::NewRequestEntity::JoinRoom { room_id } => (1, Some(room_id)),
-                        types::NewRequestEntity::NewGame => (1, None),
-                        types::NewRequestEntity::CreateRoom => (0, None),
+                        types::NewRequestEntity::JoinRoom { room_id } => (2, Some(room_id)),
+                        types::NewRequestEntity::NewGame => (2, None),
+                        types::NewRequestEntity::CreateRoom => (1, None),
                     };
 
                     let room_request = RoomServiceRequest {

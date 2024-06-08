@@ -34,16 +34,26 @@ pub struct Model {
     pub network_join_handler: Option<std::thread::JoinHandle<()>>,
 }
 
+#[derive(clap::Parser, Debug)]
+#[command(version, about, long_about = None)]
+pub struct ClientArgs {
+    /// Whether new users should be created
+    /// If not passed, then use the existing user key in ./local/state/blazerapp.toml
+    #[arg(short, long, default_value_t = false)]
+    pub create_guest: bool,
+}
+
 impl Model {
-    pub fn new(config: ClientConfig) -> Self {
+    pub fn new(config: ClientConfig, args: ClientArgs) -> Self {
         let (grpc_sender, grpc_receiver) = mpsc::channel::<network::types::Request>();
         // start the network client
 
         let mut network_client = NetworkClient::default();
         let cloned_network_client = network_client.clone();
 
-        let join_handler =
-            std::thread::spawn(move || network_client.start_network_client(grpc_receiver, config));
+        let join_handler = std::thread::spawn(move || {
+            network_client.start_network_client(grpc_receiver, config, args)
+        });
 
         Self {
             app: Self::init_app(cloned_network_client),
