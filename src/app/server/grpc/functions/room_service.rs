@@ -2,7 +2,12 @@ use rand::Rng;
 use tokio::sync::mpsc;
 
 use crate::app::{
-    server::errors::{self, ResultExtApp},
+    server::{
+        errors::{self, ResultExtApp},
+        grpc::storage::interface::{
+            room::RoomInterface, session::SessionInterface, user::UserInterface,
+        },
+    },
     types::{RoomServiceRequestType, RoomServiceResponseType},
 };
 
@@ -29,16 +34,14 @@ pub async fn room_service(
     let (tx, mut rx) = mpsc::channel::<types::Message>(10);
 
     // Insert the user into channel so that async communication can take place
-    state.insert_user_channel(current_user_id.clone(), tx.clone());
+    state
+        .store
+        .insert_channel(&current_user_id, tx.clone())
+        .await
+        .to_internal_api_error()?;
 
     // Authenticate user
-    let mut user_from_db = state
-        .redis_client
-        .get_user(current_user_id.clone())
-        .await
-        .to_not_found(errors::ApiError::UserNotFound {
-            user_id: current_user_id.clone(),
-        })?;
+    let mut user_from_db = user;
 
     match request_type {
         RoomServiceRequestType::CreateRoom => {
@@ -48,13 +51,13 @@ pub async fn room_service(
             });
 
             // If the room already exists then the client must retry with a different room_id
-            match state.redis_client.get_room(room_id.clone()).await {
+            match state.store.find_room(&room_id).await {
                 Ok(_) => Err(errors::ApiError::RoomAlreadyExists { room_id })?,
                 Err(error) => {
                     if error.is_not_found() {
                         let room = models::Room::new(room_id, 2);
                         let db_room = state
-                            .redis_client
+                            .store
                             .insert_room(room)
                             .await
                             .to_internal_api_error()?;
@@ -76,13 +79,11 @@ pub async fn room_service(
             let room_id = request.room_id.unwrap_or(types::COMMON_ROOM.to_string());
 
             // The room should already exist, or else return an error
-            let mut room = state
-                .redis_client
-                .get_room(room_id.clone())
-                .await
-                .to_not_found(errors::ApiError::RoomNotFound {
+            let mut room = state.store.find_room(&room_id).await.to_not_found(
+                errors::ApiError::RoomNotFound {
                     room_id: room_id.clone(),
-                })?;
+                },
+            )?;
 
             // Check if user is not in the current room
             if room.users.contains(&current_user_id) {
@@ -99,7 +100,7 @@ pub async fn room_service(
 
             // Update the user in database
             user_from_db = state
-                .redis_client
+                .store
                 .insert_user(user_from_db.clone())
                 .await
                 .to_internal_api_error()?;
@@ -111,13 +112,13 @@ pub async fn room_service(
 
             // Update the room in database
             state
-                .redis_client
+                .store
                 .insert_room(room)
                 .await
                 .to_internal_api_error()?;
 
             let all_users_in_room = state
-                .redis_client
+                .store
                 .get_multiple_users(users_in_the_room.clone())
                 .await
                 .to_internal_api_error()?;
@@ -126,8 +127,10 @@ pub async fn room_service(
                 // The game can be started, inform all the connected users of this room
                 for user_id in users_in_the_room {
                     state
-                        .get_user_channel(user_id)
+                        .store
+                        .get_channel(&user_id)
                         .await
+                        .to_internal_api_error()?
                         .send(types::Message::GameStart {
                             room_id: room_id.clone(),
                             users: all_users_in_room.clone(),
@@ -146,8 +149,10 @@ pub async fn room_service(
 
                 for user_id in users_in_room_except_self {
                     state
-                        .get_user_channel(user_id)
+                        .store
+                        .get_channel(&user_id)
                         .await
+                        .to_internal_api_error()?
                         .send(types::Message::UserJoined {
                             room_id: room_id.clone(),
                             users: all_users_in_room.clone(),
@@ -167,7 +172,7 @@ pub async fn room_service(
         }
     };
 
-    let cloned_redis_client = state.redis_client.clone();
+    let cloned_store = state.store.clone();
 
     // This spawns a tokio task which reads from the channel and writes to the server stream
     tokio::spawn(async move {
@@ -231,17 +236,16 @@ pub async fn room_service(
         // Remove the user from room if he is in any
         let room_id = user_from_db.room_id.clone();
         if let Some(room_id) = room_id {
-            let room = cloned_redis_client
-                .get_room(room_id.clone())
-                .await
-                .to_not_found(errors::ApiError::RoomNotFound {
+            let room = cloned_store.find_room(&room_id).await.to_not_found(
+                errors::ApiError::RoomNotFound {
                     room_id: room_id.clone(),
-                });
+                },
+            );
 
             match room {
                 Ok(mut room) => {
                     room.remove_user(user_from_db.user_id.clone());
-                    cloned_redis_client.insert_room(room).await.unwrap();
+                    cloned_store.insert_room(room).await.unwrap();
                     log::info!(
                         "Removed user {} from the room {}",
                         user_from_db.user_id,

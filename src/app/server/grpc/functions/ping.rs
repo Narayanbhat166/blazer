@@ -1,4 +1,7 @@
-use crate::app::server::errors::{self, ResultExtApp};
+use crate::app::server::{
+    errors::{self, ResultExtApp},
+    grpc::storage::interface::user::UserInterface,
+};
 
 use crate::app::server::grpc::{
     server::{MyGrpc, PingRequest, PingResponse},
@@ -25,13 +28,11 @@ pub async fn ping(
 
     let ping_response = match optional_user_id {
         Some(user_id) => {
-            let db_user = state
-                .redis_client
-                .get_user(user_id.clone())
-                .await
-                .to_not_found(errors::ApiError::UserNotFound {
+            let db_user = state.store.find_user(&user_id).await.to_not_found(
+                errors::ApiError::UserNotFound {
                     user_id: user_id.clone(),
-                })?;
+                },
+            )?;
 
             PingResponse {
                 user_id: db_user.user_id,
@@ -45,7 +46,7 @@ pub async fn ping(
             let new_user = models::User::new(user_uuid.clone(), new_user_name);
 
             let db_user = state
-                .redis_client
+                .store
                 .insert_user(new_user)
                 .await
                 .to_duplicate(errors::ApiError::UserAlreadyExists { user_id: user_uuid })?;

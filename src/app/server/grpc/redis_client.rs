@@ -19,7 +19,7 @@ impl RedisClient {
 type DbResult<T> = Result<T, errors::DbError>;
 
 impl RedisClient {
-    async fn get_and_deserialize<
+    pub async fn get_and_deserialize<
         K: Into<fred::types::RedisKey> + Send,
         V: serde::de::DeserializeOwned,
     >(
@@ -43,7 +43,7 @@ impl RedisClient {
         }
     }
 
-    async fn serialize_and_set<
+    pub async fn serialize_and_set<
         K: Into<fred::types::RedisKey> + Send,
         V: serde::Serialize + serde::de::DeserializeOwned,
     >(
@@ -71,7 +71,7 @@ impl RedisClient {
         }
     }
 
-    async fn get_multiple_keys<
+    pub async fn get_multiple_keys<
         K: Into<MultipleKeys> + Send,
         V: serde::Serialize + serde::de::DeserializeOwned,
     >(
@@ -93,20 +93,6 @@ impl RedisClient {
                 })
             }
             Err(error) => Err(errors::DbError::Others(error)),
-        }
-    }
-
-    pub async fn get_user_optional(&self, user_id: String) -> DbResult<Option<models::User>> {
-        let res = self.get_and_deserialize::<_, models::User>(user_id).await;
-        match res {
-            Ok(user) => Ok(Some(user)),
-            Err(db_error) => {
-                if db_error.is_not_found() {
-                    Ok(None)
-                } else {
-                    Err(db_error)
-                }
-            }
         }
     }
 

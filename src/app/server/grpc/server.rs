@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     fmt::Debug,
     sync::{Arc, Mutex},
 };
@@ -10,9 +9,11 @@ pub use blazer_grpc::{
 };
 
 use super::{functions, redis_client::RedisClient, storage::models, types};
-use tokio::sync::mpsc;
 
-use crate::app::server::errors::{self, ResultExtApp};
+use crate::app::server::{
+    errors::{self, ResultExtApp},
+    grpc::storage::{interface::user::UserInterface, Store},
+};
 
 mod blazer_grpc {
     // The string specified here must match the proto package name
@@ -33,8 +34,7 @@ impl From<models::User> for UserDetails {
 }
 
 pub struct MyGrpc {
-    pub redis_client: RedisClient,
-    connected_users: Arc<Mutex<HashMap<String, mpsc::Sender<types::Message>>>>,
+    pub store: Store,
 }
 
 impl MyGrpc {
@@ -55,25 +55,12 @@ impl MyGrpc {
             tracing::info!("Common room already exists");
         }
 
-        Self {
+        let store = Store {
             redis_client,
-            connected_users: Arc::new(Mutex::new(std::collections::HashMap::new())),
-        }
-    }
+            session_state: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        };
 
-    pub fn insert_user_channel(
-        &self,
-        user_id: String,
-        sender_channel: mpsc::Sender<types::Message>,
-    ) {
-        let mut connected_users = self.connected_users.lock().unwrap();
-        connected_users.insert(user_id, sender_channel);
-    }
-
-    pub async fn get_user_channel(&self, user_id: String) -> mpsc::Sender<types::Message> {
-        let connected_users = self.connected_users.lock().unwrap();
-        let user_channel = connected_users.get(&user_id).unwrap().clone();
-        user_channel
+        Self { store }
     }
 }
 
@@ -87,8 +74,8 @@ trait GetAuthData {
 
 async fn authenticate(state: &MyGrpc, user_id: String) -> Result<models::User, errors::ApiError> {
     state
-        .redis_client
-        .get_user(user_id.clone())
+        .store
+        .find_user(&user_id)
         .await
         .to_not_found(errors::ApiError::UserNotFound { user_id })
 }
