@@ -172,7 +172,7 @@ impl Update<Msg> for Model {
                             self.app.active(&Id::RoomDetails).unwrap();
                         }
                         types::AppStateUpdate::UserRoomJoin { .. } => {}
-                        types::AppStateUpdate::GameStart => todo!(),
+                        types::AppStateUpdate::GameStart { .. } => {}
                     }
                     let new_state = self.state.clone().apply_update(state_update);
                     self.state = new_state;

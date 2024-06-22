@@ -12,7 +12,8 @@ pub mod interface;
 pub mod models;
 
 /// Store the client connections to this instance of the application
-type SessionState = Arc<Mutex<HashMap<String, tokio::sync::mpsc::Sender<super::types::Message>>>>;
+type SessionState =
+    Arc<Mutex<HashMap<String, tokio::sync::mpsc::Sender<super::types::RoomMessage>>>>;
 
 /// A store that holds the storage clients for various storage types
 #[derive(Clone)]

@@ -71,3 +71,20 @@ where
             .expect("Cannot write to file");
     }
 }
+
+/// Generate a time-ordered (time-sortable) unique identifier using the current time
+#[inline]
+pub fn generate_time_ordered_id(prefix: &str) -> String {
+    format!("{prefix}_{}", uuid::Uuid::now_v7().as_simple())
+}
+
+/// Generate a random name
+pub fn generate_name() -> String {
+    let random_name_generator = rnglib::RNG::from(&rnglib::Language::Fantasy);
+
+    format!(
+        "{} {}",
+        random_name_generator.generate_name(),
+        random_name_generator.generate_name()
+    )
+}

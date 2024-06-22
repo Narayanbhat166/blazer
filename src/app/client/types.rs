@@ -28,7 +28,10 @@ pub enum AppStateUpdate {
     UserRoomJoin {
         users: Vec<UserDetails>,
     },
-    GameStart,
+    GameStart {
+        room_id: String,
+        users: Vec<UserDetails>,
+    },
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -128,14 +131,16 @@ impl AppState {
                     ..self
                 }
             }
-            AppStateUpdate::GameStart => {
-                // let game_data = GameState {
-                //     room_id: todo!(),
-                //     game_id: todo!(),
-                //     has_started: todo!(),
-                // };
+            AppStateUpdate::GameStart { room_id, users } => {
+                let room_state = RoomState {
+                    room_id,
+                    room_users: users,
+                };
 
-                self
+                Self {
+                    room_details: Some(room_state),
+                    ..self
+                }
             }
         }
     }

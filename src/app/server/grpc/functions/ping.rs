@@ -8,16 +8,6 @@ use crate::app::server::grpc::{
     storage::models,
 };
 
-pub fn generate_name() -> String {
-    let random_name_generator = rnglib::RNG::from(&rnglib::Language::Fantasy);
-
-    format!(
-        "{} {}",
-        random_name_generator.generate_name(),
-        random_name_generator.generate_name()
-    )
-}
-
 pub async fn ping(
     state: &MyGrpc,
     request: tonic::Request<PingRequest>,
@@ -41,15 +31,14 @@ pub async fn ping(
         }
         None => {
             // Create new user
-            let user_uuid = uuid::Uuid::new_v4().as_simple().to_string();
-            let new_user_name = generate_name();
-            let new_user = models::User::new(user_uuid.clone(), new_user_name);
+            let new_user = models::User::new();
+            let user_id = new_user.user_id.clone();
 
             let db_user = state
                 .store
                 .insert_user(new_user)
                 .await
-                .to_duplicate(errors::ApiError::UserAlreadyExists { user_id: user_uuid })?;
+                .to_duplicate(errors::ApiError::UserAlreadyExists { user_id })?;
 
             PingResponse {
                 user_id: db_user.user_id,

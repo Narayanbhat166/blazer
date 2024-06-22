@@ -20,7 +20,7 @@ serde = { version = "1.0.195", features = ["derive"] }
 fred = "7.1.2"
 thiserror = "1.0.56"
 serde_json = "1.0.111"
-uuid = { version = "1.6.1", features = ["v4"] }
+uuid = { version = "1.6.1", features = ["v7"] }
 toml = "0.8.8"
 tokio-stream = "0.1.14"
 rand = "0.8.5"

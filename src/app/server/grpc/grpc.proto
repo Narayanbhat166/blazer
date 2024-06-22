@@ -7,6 +7,33 @@ service Grpc {
 
   // Use this function for creating all different types of rooms
   rpc RoomService (RoomServiceRequest) returns (stream RoomServiceResponse);
+
+  // Use this function for all game related communication
+  // When the game is init, the character set is sent to client
+  // Client sends it's progress every couple of seconds
+  // Server sends the status of other connected players
+  rpc GameService (stream GameServiceRequest) returns (stream GameServiceResponse);
+}
+
+message GameServiceRequest {
+  
+}
+
+message GameUserStatus {
+  string client_id = 1;
+  uint32 status = 2;
+}
+
+message GameServiceResponse {
+  enum MessageType {
+    MESSAGE_TYPE_UNSPECIFIED = 0;
+    MESSAGE_TYPE_INIT = 1;
+    MESSAGE_TYPE_STATUS = 2;
+  }
+  string client_id = 1;
+  string game_id = 2;
+  optional GameUserStatus game_user_status = 3;
+  optional string prompt = 4;
 }
 
 message RoomServiceRequest {
@@ -43,15 +70,9 @@ message PingRequest {
   optional string user_id = 1;
 }
 
-message Register {
-
-}
-
-message Authenticate {
-  string user_id = 1;
-}
-
 message PingResponse {
   string user_id = 1;
   string user_name = 2;
 }
+
+

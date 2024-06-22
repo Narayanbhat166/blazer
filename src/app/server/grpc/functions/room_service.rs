@@ -1,11 +1,12 @@
 use rand::Rng;
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, error::TryRecvError};
 
 use crate::app::{
     server::{
         errors::{self, ResultExtApp},
         grpc::storage::interface::{
-            room::RoomInterface, session::SessionInterface, user::UserInterface,
+            game::GameInterface, room::RoomInterface, session::SessionInterface,
+            user::UserInterface,
         },
     },
     types::{RoomServiceRequestType, RoomServiceResponseType},
@@ -31,13 +32,12 @@ pub async fn room_service(
     let current_user_id = user.user_id.clone();
 
     let (response_sender, response_receiver) = mpsc::channel(128);
-    let (tx, mut rx) = mpsc::channel::<types::Message>(10);
+    let (tx, mut rx) = mpsc::channel::<types::RoomMessage>(10);
 
     // Insert the user into channel so that async communication can take place
     state
         .store
-        .insert_channel(&current_user_id, tx.clone())
-        .await
+        .insert_channel(&current_user_id, tx)
         .to_internal_api_error()?;
 
     // Authenticate user
@@ -62,12 +62,18 @@ pub async fn room_service(
                             .await
                             .to_internal_api_error()?;
 
-                        tx.send(types::Message::RoomCreated {
-                            room_id: db_room.room_id,
-                            users: vec![user_from_db.clone()],
-                        })
-                        .await
-                        .unwrap();
+                        let current_user_channel = state
+                            .store
+                            .get_channel(&user_from_db.user_id)
+                            .to_internal_api_error()?;
+
+                        current_user_channel
+                            .send(types::RoomMessage::RoomCreated {
+                                room_id: db_room.room_id,
+                                users: vec![user_from_db.clone()],
+                            })
+                            .await
+                            .unwrap();
                     } else {
                         Err(error).to_internal_api_error()?
                     }
@@ -92,6 +98,14 @@ pub async fn room_service(
                 })?
             }
 
+            // Check if the length of the room is max
+            // This can happen in cases when there is a slight delay in starting the game when all users are already in the room
+            if room.users.len() == usize::from(room.room_size) {
+                Err(errors::ApiError::BadRequest {
+                    message: "Maximum capacity has been reached for the room".to_string(),
+                })?
+            }
+
             // Add the current user to the room
             let room_size = room.add_user(current_user_id.clone());
 
@@ -109,13 +123,7 @@ pub async fn room_service(
 
             // Get details about all users in the room, send them update
             let users_in_the_room = room.users.clone();
-
-            // Update the room in database
-            state
-                .store
-                .insert_room(room)
-                .await
-                .to_internal_api_error()?;
+            tracing::info!("users in room {users_in_the_room:?}");
 
             let all_users_in_room = state
                 .store
@@ -123,25 +131,57 @@ pub async fn room_service(
                 .await
                 .to_internal_api_error()?;
 
+            tracing::info!("users in room {all_users_in_room:?}");
+
+            // If the room has reached its maximum capacity, start the game
             if room_size == room_max_capacity as usize {
+                // Create the game
+                let test_prompt = "This is a sample prompt for the game".to_string();
+                let game = models::Game::new(&all_users_in_room, test_prompt);
+                state
+                    .store
+                    .insert_game(game)
+                    .await
+                    .to_internal_api_error()?;
+
                 // The game can be started, inform all the connected users of this room
                 for user_id in users_in_the_room {
                     state
                         .store
                         .get_channel(&user_id)
-                        .await
                         .to_internal_api_error()?
-                        .send(types::Message::GameStart {
+                        .send(types::RoomMessage::AllUsersJoined {
                             room_id: room_id.clone(),
                             users: all_users_in_room.clone(),
                         })
                         .await
                         .unwrap();
                 }
+
+                if room_id == types::COMMON_ROOM {
+                    room.users.clear();
+                    state
+                        .store
+                        .insert_room(room)
+                        .await
+                        .to_internal_api_error()?;
+                } else {
+                    state
+                        .store
+                        .delete_room(&room_id)
+                        .await
+                        .to_internal_api_error()?;
+                }
             } else {
+                // Update the room in database with the new user
+                state
+                    .store
+                    .insert_room(room)
+                    .await
+                    .to_internal_api_error()?;
+
                 // The current user has joined this room
                 // Inform all other users, except current user, that this person has joined the room
-
                 let users_in_room_except_self = users_in_the_room
                     .into_iter()
                     .filter(|user_id| user_id != &current_user_id)
@@ -151,9 +191,8 @@ pub async fn room_service(
                     state
                         .store
                         .get_channel(&user_id)
-                        .await
                         .to_internal_api_error()?
-                        .send(types::Message::UserJoined {
+                        .send(types::RoomMessage::UserJoined {
                             room_id: room_id.clone(),
                             users: all_users_in_room.clone(),
                         })
@@ -161,78 +200,104 @@ pub async fn room_service(
                         .unwrap();
                 }
 
+                let current_user_channel = state
+                    .store
+                    .get_channel(&user_from_db.user_id)
+                    .to_internal_api_error()?;
+
                 // Send the message to current user
-                tx.send(types::Message::RoomCreated {
-                    room_id: room_id.clone(),
-                    users: all_users_in_room.clone(),
-                })
-                .await
-                .unwrap();
+                current_user_channel
+                    .send(types::RoomMessage::RoomCreated {
+                        room_id: room_id.clone(),
+                        users: all_users_in_room.clone(),
+                    })
+                    .await
+                    .unwrap();
             }
         }
     };
 
     let cloned_store = state.store.clone();
+    let cloned_user = user_from_db.clone();
 
     // This spawns a tokio task which reads from the channel and writes to the server stream
     tokio::spawn(async move {
-        while let Some(item) = rx.recv().await {
-            let (response, should_close_stream) = match item {
-                types::Message::GameStart { room_id, users } => (
-                    Some(RoomServiceResponse {
-                        room_id: Some(room_id),
-                        message_type: RoomServiceResponseType::GameStart.to_u8().into(),
-                        user_details: users.into_iter().map(Into::into).collect::<Vec<_>>(),
-                    }),
-                    true,
-                ),
-                types::Message::RoomCreated { room_id, users } => (
-                    Some(RoomServiceResponse {
-                        room_id: Some(room_id),
-                        message_type: RoomServiceResponseType::Init.to_u8().into(),
-                        user_details: users.into_iter().map(Into::into).collect::<Vec<_>>(),
-                    }),
-                    false,
-                ),
-                types::Message::RoomJoined { room_id, users } => (
-                    Some(RoomServiceResponse {
-                        room_id: Some(room_id),
-                        message_type: RoomServiceResponseType::Init.to_u8().into(),
-                        user_details: users.into_iter().map(Into::into).collect::<Vec<_>>(),
-                    }),
-                    false,
-                ),
-                types::Message::UserJoined { room_id, users } => (
-                    Some(RoomServiceResponse {
-                        room_id: Some(room_id),
-                        message_type: RoomServiceResponseType::UserJoined.to_u8().into(),
-                        user_details: users.into_iter().map(Into::into).collect::<Vec<_>>(),
-                    }),
-                    false,
-                ),
-            };
+        loop {
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
+            interval.tick().await;
 
-            if let Some(response) = response {
-                tracing::info!(message=?response, to=?current_user_id);
-                match response_sender
-                    .send(Result::<_, tonic::Status>::Ok(response))
-                    .await
-                {
-                    Ok(()) => {
-                        if should_close_stream {
-                            // Break the loop and close this stream, drop the receiver and sender
-                            break;
+            let next_value = rx.try_recv();
+            match next_value {
+                Ok(item) => {
+                    let (response, should_close_stream) = match item {
+                        types::RoomMessage::AllUsersJoined { room_id, users } => (
+                            Some(RoomServiceResponse {
+                                room_id: Some(room_id),
+                                message_type: RoomServiceResponseType::GameStart.to_u8().into(),
+                                user_details: users.into_iter().map(From::from).collect::<Vec<_>>(),
+                            }),
+                            true,
+                        ),
+                        types::RoomMessage::RoomCreated { room_id, users } => (
+                            Some(RoomServiceResponse {
+                                room_id: Some(room_id),
+                                message_type: RoomServiceResponseType::Init.to_u8().into(),
+                                user_details: users.into_iter().map(From::from).collect::<Vec<_>>(),
+                            }),
+                            false,
+                        ),
+                        types::RoomMessage::RoomJoined { room_id, users } => (
+                            Some(RoomServiceResponse {
+                                room_id: Some(room_id),
+                                message_type: RoomServiceResponseType::Init.to_u8().into(),
+                                user_details: users.into_iter().map(From::from).collect::<Vec<_>>(),
+                            }),
+                            false,
+                        ),
+                        types::RoomMessage::UserJoined { room_id, users } => (
+                            Some(RoomServiceResponse {
+                                room_id: Some(room_id),
+                                message_type: RoomServiceResponseType::UserJoined.to_u8().into(),
+                                user_details: users.into_iter().map(From::from).collect::<Vec<_>>(),
+                            }),
+                            false,
+                        ),
+                    };
+
+                    if let Some(response) = response {
+                        log::info!("message={response:?}, to={current_user_id:?}");
+                        match response_sender
+                            .send(Result::<_, tonic::Status>::Ok(response))
+                            .await
+                        {
+                            Ok(()) => {
+                                if should_close_stream {
+                                    log::info!(
+                                        "Closing the stream for user because of the flag {}",
+                                        cloned_user.user_id
+                                    );
+                                    // Break the loop and close this stream, drop the receiver and sender
+                                    break;
+                                }
+                            }
+                            Err(_error) => {
+                                log::info!("User stream closed for user {} ", cloned_user.user_id);
+                                // output_stream was built from rx and both are dropped
+                                break;
+                            }
                         }
+                    } else {
+                        tracing::info!("empty response received");
                     }
-                    Err(_item) => {
-                        // output_stream was built from rx and both are dropped
-                        break;
-                    }
+                }
+                Err(TryRecvError::Disconnected) => break,
+                Err(TryRecvError::Empty) if response_sender.is_closed() => break,
+                Err(TryRecvError::Empty) => {
+                    interval.tick().await;
                 }
             }
         }
 
-        println!("Client disconnected");
         // Remove the user from room if he is in any
         let room_id = user_from_db.room_id.clone();
         if let Some(room_id) = room_id {
@@ -251,8 +316,15 @@ pub async fn room_service(
                         user_from_db.user_id,
                         room_id
                     );
+
+                    cloned_store
+                        .remove_channel(&user_from_db.user_id)
+                        .to_internal_api_error()
+                        .unwrap();
                 }
-                Err(_) => todo!(),
+                Err(error) => {
+                    tracing::error!(?error);
+                }
             };
         };
     });

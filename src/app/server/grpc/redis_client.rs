@@ -1,6 +1,5 @@
 use fred::{interfaces::KeysInterface, types::MultipleKeys};
 
-use super::storage::models;
 use crate::app::server::errors;
 
 #[derive(Clone)]
@@ -96,45 +95,17 @@ impl RedisClient {
         }
     }
 
-    pub async fn get_user(&self, user_id: String) -> DbResult<models::User> {
-        let res = self.get_and_deserialize::<_, models::User>(user_id).await;
-        match res {
-            Ok(user) => Ok(user),
-            Err(db_error) => {
-                if db_error.is_not_found() {
-                    Err(errors::DbError::NotFound)
-                } else {
-                    Err(db_error)
-                }
+    pub async fn delete_key(&self, key: &str) -> DbResult<()> {
+        let delete_result = self.client.del::<usize, _>(key).await;
+        match delete_result {
+            Ok(_) => {
+                tracing::info!("Key {key} has been successfully deleted");
+                Ok(())
+            }
+            Err(error) => {
+                tracing::error!(?error);
+                Err(errors::DbError::Others(error))
             }
         }
-    }
-
-    pub async fn insert_user(&self, user: models::User) -> DbResult<models::User> {
-        let user_id = user.user_id.clone();
-        self.serialize_and_set(user_id, user).await
-    }
-
-    pub async fn insert_room(&self, room: models::Room) -> DbResult<models::Room> {
-        let room_id = room.room_id.clone();
-        self.serialize_and_set(room_id, room).await
-    }
-
-    pub async fn get_room_optional(&self, room_id: String) -> DbResult<Option<models::Room>> {
-        let res = self.get_and_deserialize::<_, models::Room>(room_id).await;
-
-        match res {
-            Ok(room) => Ok(Some(room)),
-            Err(error) if error.is_not_found() => Ok(None),
-            Err(error) => Err(error),
-        }
-    }
-
-    pub async fn get_room(&self, room_id: String) -> DbResult<models::Room> {
-        self.get_and_deserialize::<_, models::Room>(room_id).await
-    }
-
-    pub async fn get_multiple_users(&self, user_ids: Vec<String>) -> DbResult<Vec<models::User>> {
-        self.get_multiple_keys(user_ids).await
     }
 }

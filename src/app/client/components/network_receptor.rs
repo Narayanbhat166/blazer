@@ -22,7 +22,12 @@ impl Component<Msg, UserEvent> for NetworkReceptor {
                     Some(Msg::StateUpdate(app_state_update))
                 }
 
-                UserEvent::GameStart => None,
+                UserEvent::GameStart { room_id, users } => {
+                    let users = users.into_iter().map(Into::into).collect::<Vec<_>>();
+
+                    let app_state_update = AppStateUpdate::GameStart { room_id, users };
+                    Some(Msg::StateUpdate(app_state_update))
+                }
                 UserEvent::InfoMessage(_) => todo!(),
                 UserEvent::NetworkError(_) => todo!(),
                 UserEvent::UserJoined { users } => {

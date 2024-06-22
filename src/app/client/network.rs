@@ -86,7 +86,21 @@ fn handle_room_service_message(message: RoomServiceResponse, network_client: Net
 
             network_client.push_user_event(user_joined_event);
         }
-        RoomServiceResponseType::GameStart => network_client.push_user_event(UserEvent::GameStart),
+        RoomServiceResponseType::GameStart => {
+            let room_id = message
+                .room_id
+                .expect("Required room id, but did not find in game start message");
+
+            let users = message
+                .user_details
+                .into_iter()
+                .map(Into::into)
+                .collect::<Vec<_>>();
+
+            let user_joined_event = UserEvent::GameStart { room_id, users };
+
+            network_client.push_user_event(user_joined_event);
+        }
     }
 }
 

@@ -1,4 +1,6 @@
-#[derive(serde::Deserialize, serde::Serialize, Clone)]
+use crate::app::utils;
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
 pub struct User {
     pub user_id: String,
     pub user_name: String,
@@ -8,8 +10,38 @@ pub struct User {
     pub game_id: Option<String>,
 }
 
+#[derive(serde::Deserialize, serde::Serialize, Copy, Clone)]
+pub enum GameStatus {
+    Init,
+    InProgress,
+    End,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone)]
+pub struct Game {
+    pub game_id: String,
+    pub users_in_game: Vec<String>,
+    pub game_status: GameStatus,
+    pub prompt: String,
+}
+
+impl Game {
+    pub fn new(users: &[User], prompt: String) -> Self {
+        let game_id = utils::generate_time_ordered_id("game");
+
+        Self {
+            game_id,
+            users_in_game: users.iter().map(|user| user.user_id.clone()).collect(),
+            game_status: GameStatus::Init,
+            prompt,
+        }
+    }
+}
+
 impl User {
-    pub fn new(user_id: String, user_name: String) -> Self {
+    pub fn new() -> Self {
+        let user_id = utils::generate_time_ordered_id("user");
+        let user_name = utils::generate_name();
         Self {
             user_id,
             user_name,
@@ -25,7 +57,7 @@ impl User {
     }
 }
 
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Room {
     pub room_id: String,
     pub room_size: u8,

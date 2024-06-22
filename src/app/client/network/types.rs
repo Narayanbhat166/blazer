@@ -9,7 +9,10 @@ pub enum UserEvent {
     UserJoined {
         users: Vec<UserDetails>,
     },
-    GameStart,
+    GameStart {
+        room_id: String,
+        users: Vec<UserDetails>,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Clone)]

@@ -77,8 +77,11 @@ impl Component<Msg, UserEvent> for BottomBar {
 
                     self.set_text(text_message, MessageType::Success);
                 }
-                UserEvent::GameStart => {
-                    self.set_text("Game will start now".to_string(), MessageType::Info);
+                UserEvent::GameStart { .. } => {
+                    self.set_text(
+                        "All users have joined, game will start now".to_string(),
+                        MessageType::Info,
+                    );
                 }
                 UserEvent::UserJoined { users } => {
                     let text = format!(

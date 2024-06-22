@@ -250,7 +250,20 @@ impl Component<Msg, UserEvent> for Details {
 
                     None
                 }
-                _ => None,
+                UserEvent::GameStart { room_id, users } => {
+                    let room_details = RoomDetails {
+                        room_id,
+                        max_players: 2,
+                        current_players: users.len(),
+                    };
+
+                    self.state.room_details = Some(room_details);
+                    self.state.users = users.into_iter().map(UserDetails::from).collect::<Vec<_>>();
+                    self.state.is_in_waiting_room = true;
+
+                    None
+                }
+                UserEvent::InfoMessage(_) | UserEvent::NetworkError(_) => None,
             },
             _ => None,
         }

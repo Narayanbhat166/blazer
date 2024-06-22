@@ -4,6 +4,7 @@ use crate::app::server::grpc::storage::{models, StorageResult, Store};
 pub trait RoomInterface {
     async fn insert_room(&self, room: models::Room) -> StorageResult<models::Room>;
     async fn find_room(&self, room_id: &str) -> StorageResult<models::Room>;
+    async fn delete_room(&self, room_id: &str) -> StorageResult<()>;
 }
 
 impl RoomInterface for Store {
@@ -14,5 +15,9 @@ impl RoomInterface for Store {
 
     async fn find_room(&self, room_id: &str) -> StorageResult<models::Room> {
         self.redis_client.get_and_deserialize(room_id).await
+    }
+
+    async fn delete_room(&self, room_id: &str) -> StorageResult<()> {
+        self.redis_client.delete_key(room_id).await
     }
 }
