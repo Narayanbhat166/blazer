@@ -12,7 +12,6 @@ type SessionChannel = tokio::sync::mpsc::Sender<Result<RoomServiceResponse, toni
 /// Channels can be inserted and removed for the same user based on the current interaction
 pub trait SessionInterface {
     fn insert_channel(&self, user_id: &str, channel: SessionChannel) -> StorageResult<()>;
-    fn get_channel(&self, user_id: &str) -> StorageResult<SessionChannel>;
     fn remove_channel(&self, user_id: &str) -> StorageResult<()>;
     fn send_message_to_user(
         &self,
@@ -28,13 +27,6 @@ impl SessionInterface for Store {
         Ok(())
     }
 
-    #[track_caller]
-    fn get_channel(&self, user_id: &str) -> StorageResult<SessionChannel> {
-        let connected_users = self.room_users_state.lock().unwrap();
-        let user_channel = connected_users.get(user_id).unwrap().clone();
-        Ok(user_channel)
-    }
-
     fn remove_channel(&self, user_id: &str) -> StorageResult<()> {
         let mut connected_users = self.room_users_state.lock().unwrap();
         let user_channel = connected_users.remove(user_id).unwrap().clone();
@@ -48,11 +40,15 @@ impl SessionInterface for Store {
         message: RoomMessage,
     ) -> impl std::future::Future<Output = StorageResult<()>> {
         let grpc_response = RoomServiceResponse::from(message);
-        async {
-            let user_channel = self.get_channel(user_id)?;
+        let user_channel = self.room_users_state.lock().unwrap();
 
+        let user_channel = user_channel
+            .get(user_id)
+            .expect("The user channel cannot be found")
+            .clone();
+
+        async move {
             user_channel.send(Ok(grpc_response)).await.unwrap();
-
             Ok(())
         }
     }
