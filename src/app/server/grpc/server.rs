@@ -48,7 +48,7 @@ impl MyGrpc {
         // Create the common room if not exists at the application startup
         let store = Store {
             redis_client,
-            session_state: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            room_users_state: Arc::new(Mutex::new(std::collections::HashMap::new())),
         };
 
         let common_room = store.find_room(types::COMMON_ROOM_KEY).await;

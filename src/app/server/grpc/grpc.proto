@@ -61,7 +61,7 @@ message RoomServiceResponse {
     MESSAGE_TYPE_USER_JOINED = 2;
     MESSAGE_TYPE_GAME_START = 3;
   }
-  optional string room_id = 1;
+  string room_id = 1;
   MessageType message_type = 2;
   repeated UserDetails user_details = 3;
 }
