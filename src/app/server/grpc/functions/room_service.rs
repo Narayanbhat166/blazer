@@ -1,5 +1,5 @@
 use rand::Rng;
-use tokio::sync::mpsc::{self, error::TryRecvError};
+use tokio::sync::mpsc::{self};
 
 use crate::app::{
     server::{
@@ -9,15 +9,20 @@ use crate::app::{
             user::UserInterface,
         },
     },
-    types::{RoomServiceRequestType, RoomServiceResponseType},
+    types::RoomServiceRequestType,
 };
 
 use crate::app::server::grpc::{
-    server::{grpc_server, MyGrpc, RoomServiceRequest, RoomServiceResponse},
+    server::{grpc_server, MyGrpc, RoomServiceRequest},
     storage::models,
     types,
 };
 
+/// Establish a streaming connection with the client
+/// This helps in notifying about the current users in the room
+///
+/// Once all the users join the room, game can be started
+/// A new stream has to be established with the client for the game
 pub async fn room_service(
     state: &MyGrpc,
     user: models::User,
@@ -31,13 +36,12 @@ pub async fn room_service(
 
     let current_user_id = user.user_id.clone();
 
-    let (response_sender, response_receiver) = mpsc::channel(128);
-    let (tx, mut rx) = mpsc::channel::<types::RoomMessage>(10);
+    let (response_sender, response_receiver) = mpsc::channel::<Result<_, _>>(128);
 
     // Insert the user into channel so that async communication can take place
     state
         .store
-        .insert_channel(&current_user_id, tx)
+        .insert_channel(&current_user_id, response_sender.clone())
         .to_internal_api_error()?;
 
     // Authenticate user
@@ -62,18 +66,17 @@ pub async fn room_service(
                             .await
                             .to_internal_api_error()?;
 
-                        let current_user_channel = state
+                        state
                             .store
-                            .get_channel(&user_from_db.user_id)
-                            .to_internal_api_error()?;
-
-                        current_user_channel
-                            .send(types::RoomMessage::RoomCreated {
-                                room_id: db_room.room_id,
-                                users: vec![user_from_db.clone()],
-                            })
+                            .send_message_to_user(
+                                &user_from_db.user_id,
+                                types::RoomMessage::RoomCreated {
+                                    room_id: db_room.room_id,
+                                    users: vec![user_from_db.clone()],
+                                },
+                            )
                             .await
-                            .unwrap();
+                            .to_internal_api_error()?;
                     } else {
                         Err(error).to_internal_api_error()?
                     }
@@ -150,12 +153,13 @@ pub async fn room_service(
                 for user_id in users_in_the_room {
                     state
                         .store
-                        .get_channel(&user_id)
-                        .to_internal_api_error()?
-                        .send(types::RoomMessage::AllUsersJoined {
-                            room_id: room_id.clone(),
-                            users: all_users_in_room.clone(),
-                        })
+                        .send_message_to_user(
+                            &user_id,
+                            types::RoomMessage::AllUsersJoined {
+                                room_id: room_id.clone(),
+                                users: all_users_in_room.clone(),
+                            },
+                        )
                         .await
                         .unwrap();
                 }
@@ -192,144 +196,76 @@ pub async fn room_service(
                 for user_id in users_in_room_except_self {
                     state
                         .store
-                        .get_channel(&user_id)
-                        .to_internal_api_error()?
-                        .send(types::RoomMessage::UserJoined {
-                            room_id: room_id.clone(),
-                            users: all_users_in_room.clone(),
-                        })
+                        .send_message_to_user(
+                            &user_id,
+                            types::RoomMessage::UserJoined {
+                                room_id: room_id.clone(),
+                                users: all_users_in_room.clone(),
+                            },
+                        )
                         .await
                         .unwrap();
                 }
 
-                let current_user_channel = state
+                state
                     .store
-                    .get_channel(&user_from_db.user_id)
-                    .to_internal_api_error()?;
-
-                // Send the message to current user
-                current_user_channel
-                    .send(types::RoomMessage::RoomCreated {
-                        room_id: room_id.clone(),
-                        users: all_users_in_room.clone(),
-                    })
+                    .send_message_to_user(
+                        &user_from_db.user_id,
+                        types::RoomMessage::RoomCreated {
+                            room_id: room_id.clone(),
+                            users: all_users_in_room.clone(),
+                        },
+                    )
                     .await
-                    .unwrap();
+                    .to_internal_api_error()?;
             }
         }
     };
 
     let cloned_store = state.store.clone();
-    let cloned_user = user_from_db.clone();
+    let cloned_response_sender = response_sender.clone();
 
-    // This spawns a tokio task which reads from the channel and writes to the server stream
-    // This can be avoided, we can store the sender channel directly
+    // Spawn a tokio task to remove the user session from the session store
     tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
+        interval.tick().await;
+
         loop {
-            let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
             interval.tick().await;
 
-            let next_value = rx.try_recv();
-            match next_value {
-                Ok(item) => {
-                    let (response, should_close_stream) = match item {
-                        types::RoomMessage::AllUsersJoined { room_id, users } => (
-                            Some(RoomServiceResponse {
-                                room_id: Some(room_id),
-                                message_type: RoomServiceResponseType::GameStart.to_u8().into(),
-                                user_details: users.into_iter().map(From::from).collect::<Vec<_>>(),
-                            }),
-                            true,
-                        ),
-                        types::RoomMessage::RoomCreated { room_id, users } => (
-                            Some(RoomServiceResponse {
-                                room_id: Some(room_id),
-                                message_type: RoomServiceResponseType::Init.to_u8().into(),
-                                user_details: users.into_iter().map(From::from).collect::<Vec<_>>(),
-                            }),
-                            false,
-                        ),
-                        types::RoomMessage::RoomJoined { room_id, users } => (
-                            Some(RoomServiceResponse {
-                                room_id: Some(room_id),
-                                message_type: RoomServiceResponseType::Init.to_u8().into(),
-                                user_details: users.into_iter().map(From::from).collect::<Vec<_>>(),
-                            }),
-                            false,
-                        ),
-                        types::RoomMessage::UserJoined { room_id, users } => (
-                            Some(RoomServiceResponse {
-                                room_id: Some(room_id),
-                                message_type: RoomServiceResponseType::UserJoined.to_u8().into(),
-                                user_details: users.into_iter().map(From::from).collect::<Vec<_>>(),
-                            }),
-                            false,
-                        ),
-                    };
-
-                    if let Some(response) = response {
-                        log::info!("message={response:?}, to={current_user_id:?}");
-                        match response_sender
-                            .send(Result::<_, tonic::Status>::Ok(response))
-                            .await
-                        {
-                            Ok(()) => {
-                                if should_close_stream {
-                                    log::info!(
-                                        "Closing the stream for user because of the flag {}",
-                                        cloned_user.user_id
-                                    );
-                                    // Break the loop and close this stream, drop the receiver and sender
-                                    break;
-                                }
-                            }
-                            Err(_error) => {
-                                log::info!("User stream closed for user {} ", cloned_user.user_id);
-                                // output_stream was built from rx and both are dropped
-                                break;
-                            }
-                        }
-                    } else {
-                        tracing::info!("empty response received");
-                    }
-                }
-                Err(TryRecvError::Disconnected) => break,
-                Err(TryRecvError::Empty) if response_sender.is_closed() => break,
-                Err(TryRecvError::Empty) => {
-                    interval.tick().await;
-                }
-            }
-        }
-
-        // Remove the user from room if he is in any
-        let room_id = user_from_db.room_id.clone();
-        if let Some(room_id) = room_id {
-            let room = cloned_store.find_room(&room_id).await.to_not_found(
-                errors::ApiError::RoomNotFound {
-                    room_id: room_id.clone(),
-                },
-            );
-
-            match room {
-                Ok(mut room) => {
-                    room.remove_user(user_from_db.user_id.clone());
-                    cloned_store.insert_room(room).await.unwrap();
-                    log::info!(
-                        "Removed user {} from the room {}",
-                        user_from_db.user_id,
-                        room_id
+            if cloned_response_sender.is_closed() {
+                let room_id = user_from_db.room_id.clone();
+                if let Some(room_id) = room_id {
+                    let room = cloned_store.find_room(&room_id).await.to_not_found(
+                        errors::ApiError::RoomNotFound {
+                            room_id: room_id.clone(),
+                        },
                     );
 
-                    cloned_store
-                        .remove_channel(&user_from_db.user_id)
-                        .to_internal_api_error()
-                        .unwrap();
-                }
-                Err(error) => {
-                    tracing::error!(?error);
-                }
-            };
-        };
+                    match room {
+                        Ok(mut room) => {
+                            room.remove_user(user_from_db.user_id.clone());
+                            cloned_store.insert_room(room).await.unwrap();
+                            log::info!(
+                                "Removed user {} from the room {}",
+                                user_from_db.user_id,
+                                room_id
+                            );
+
+                            cloned_store
+                                .remove_channel(&user_from_db.user_id)
+                                .to_internal_api_error()
+                                .unwrap();
+                        }
+                        Err(error) => {
+                            tracing::error!(?error);
+                        }
+                    };
+                };
+
+                break;
+            }
+        }
     });
 
     let output_stream = tokio_stream::wrappers::ReceiverStream::new(response_receiver);

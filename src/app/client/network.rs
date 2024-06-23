@@ -61,9 +61,7 @@ fn handle_room_service_message(message: RoomServiceResponse, network_client: Net
 
     match message_type {
         RoomServiceResponseType::Init => {
-            let room_id = message
-                .room_id
-                .expect("Required room id, but did not find in init message");
+            let room_id = message.room_id;
 
             let users = message
                 .user_details
@@ -87,9 +85,7 @@ fn handle_room_service_message(message: RoomServiceResponse, network_client: Net
             network_client.push_user_event(user_joined_event);
         }
         RoomServiceResponseType::GameStart => {
-            let room_id = message
-                .room_id
-                .expect("Required room id, but did not find in game start message");
+            let room_id = message.room_id;
 
             let users = message
                 .user_details
