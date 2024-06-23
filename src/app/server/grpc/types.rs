@@ -1,6 +1,6 @@
 use super::storage::models;
 
-pub const COMMON_ROOM: &str = "COMMON_ROOM_KEY";
+pub const COMMON_ROOM_KEY: &str = "COMMON_ROOM";
 pub const COMMON_ROOM_SIZE: u8 = 2;
 
 /// Message that can be sent between the client session channels

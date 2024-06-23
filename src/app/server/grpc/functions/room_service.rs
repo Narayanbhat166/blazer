@@ -82,7 +82,9 @@ pub async fn room_service(
         }
         RoomServiceRequestType::JoinRoom => {
             // This can also be used to join the common room by not passing the `room_id`
-            let room_id = request.room_id.unwrap_or(types::COMMON_ROOM.to_string());
+            let room_id = request
+                .room_id
+                .unwrap_or(types::COMMON_ROOM_KEY.to_string());
 
             // The room should already exist, or else return an error
             let mut room = state.store.find_room(&room_id).await.to_not_found(
@@ -158,7 +160,7 @@ pub async fn room_service(
                         .unwrap();
                 }
 
-                if room_id == types::COMMON_ROOM {
+                if room_id == types::COMMON_ROOM_KEY {
                     room.users.clear();
                     state
                         .store
@@ -221,6 +223,7 @@ pub async fn room_service(
     let cloned_user = user_from_db.clone();
 
     // This spawns a tokio task which reads from the channel and writes to the server stream
+    // This can be avoided, we can store the sender channel directly
     tokio::spawn(async move {
         loop {
             let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));

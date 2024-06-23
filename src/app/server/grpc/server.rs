@@ -51,7 +51,7 @@ impl MyGrpc {
             session_state: Arc::new(Mutex::new(std::collections::HashMap::new())),
         };
 
-        let common_room = store.find_room(types::COMMON_ROOM).await;
+        let common_room = store.find_room(types::COMMON_ROOM_KEY).await;
 
         match common_room {
             Ok(_) => {
@@ -59,8 +59,10 @@ impl MyGrpc {
             }
             Err(db_error) => {
                 if db_error.is_not_found() {
-                    let common_room =
-                        models::Room::new(types::COMMON_ROOM.to_string(), types::COMMON_ROOM_SIZE);
+                    let common_room = models::Room::new(
+                        types::COMMON_ROOM_KEY.to_string(),
+                        types::COMMON_ROOM_SIZE,
+                    );
                     store.insert_room(common_room).await.unwrap();
                     tracing::info!("Created a common room");
                 } else {
