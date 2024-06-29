@@ -4,7 +4,7 @@ pub struct ServerConfig {
     pub redis: Option<RedisConfig>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, Clone)]
 pub struct Server {
     pub host: String,
     pub port: String,
