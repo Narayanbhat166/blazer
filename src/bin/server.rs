@@ -18,6 +18,6 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .expect("Could not bind to server address {server_address}");
 
-    blazer::app::server::start_server(false, config, tcp_listener).await;
+    blazer::app::server::start_server(config, tcp_listener).await;
     Ok(())
 }
