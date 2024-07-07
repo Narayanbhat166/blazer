@@ -27,7 +27,7 @@ async fn connect() {
     let config =
         utils::read_config::<types::ServerConfig>("config/server.toml", Some("BLAZER_SERVER"));
     let tcp_listener = configure_server(&config).await;
-    tokio::spawn(async { start_server(true, config, tcp_listener).await });
+    tokio::spawn(async { start_server(config, tcp_listener).await });
 
     let config = utils::read_config::<ClientConfig>("config/client.toml", Some("BLAZER"));
 

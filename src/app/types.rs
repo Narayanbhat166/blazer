@@ -1,7 +1,8 @@
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Default)]
 pub struct ServerConfig {
     pub server: Option<Server>,
     pub redis: Option<RedisConfig>,
+    pub test_mode: bool,
 }
 
 #[derive(serde::Deserialize, Debug, Clone)]
