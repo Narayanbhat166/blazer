@@ -27,7 +27,7 @@ async fn connect() {
     let config =
         utils::read_config::<types::ServerConfig>("config/server.toml", Some("BLAZER_SERVER"));
     let tcp_listener = configure_server(&config).await;
-    tokio::spawn(async { start_server(config, tcp_listener).await });
+    let server_handle = tokio::spawn(async { start_server(config, tcp_listener).await });
 
     let config = utils::read_config::<ClientConfig>("config/client.toml", Some("BLAZER"));
 
@@ -47,6 +47,7 @@ async fn connect() {
         .await
         .unwrap();
 
+    // Simulate a client disconnect
     drop(room_service_response);
 
     // This sleep is necessary for the server to do some cleanup activities as soon as the function ends
