@@ -1,1 +1,1 @@
-# A blazingly fast terminal type racer, written in Rust
+# A blazingly fast terminal type racer, written in Rust.
